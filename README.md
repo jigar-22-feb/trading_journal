@@ -10,6 +10,16 @@ The project is designed to run well inside **Cursor**, and all day‑to‑day de
 
 ---
 
+### Screenshots
+
+| Dashboard | New Trade |
+|-----------|-----------|
+| ![Dashboard](tests/e2e/artifacts/dashboard.png) | ![New Trade](tests/e2e/artifacts/new-trade.png) |
+
+*Main dashboard with performance metrics, charts, and live prices. New trade entry form with asset, strategy, and full trade details.*
+
+---
+
 ### 1. Repository Structure
 
 - **`backend/`**
