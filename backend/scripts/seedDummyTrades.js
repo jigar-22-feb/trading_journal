@@ -50,7 +50,15 @@ const setups = ["9-15 ema pullback", "8-33 trend", "MMC breakout"];
 const marketConditions = ["Trending", "Ranging", "Volatile", "Quiet"];
 const convictions = ["High", "Medium", "Low"];
 const tradeGrades = ["A", "B", "C"];
-const tagPool = ["confident", "news", "trend", "reversal"];
+const tagPool = [
+  "confident", "news", "trend", "reversal", "breakout", "pullback", 
+  "scalping", "swing", "day-trade", "high-probability", "low-risk",
+  "momentum", "support", "resistance", "fibonacci", "divergence",
+  "engulfing", "pinbar", "doji", "inside-bar", "volatile", "quiet",
+  "trending", "ranging", "consolidation", "reversal-setup", "continuation",
+  "ema-crossover", "rsi-oversold", "rsi-overbought", "macd-signal",
+  "volume-spike", "gap-fill", "double-top", "double-bottom", "head-shoulders"
+];
 
 function computeRR(direction, entry, target, stop) {
   const risk = direction === "Long" ? entry - stop : stop - entry;
@@ -60,13 +68,16 @@ function computeRR(direction, entry, target, stop) {
 }
 
 async function ensureAccounts() {
-  const names = ["Trading view -D", "Delta ex -P", "exness -F"];
-  const types = ["Demo", "Personal", "Funding"];
-  const accounts = [];
-  for (let i = 0; i < names.length; i++) {
-    let acc = await Account.findOne({ account_name: names[i] });
-    if (!acc) {
-      acc = await Account.create({
+  // Fetch all existing accounts from database
+  const existingAccounts = await Account.find({});
+  
+  // If no accounts exist, create default ones
+  if (existingAccounts.length === 0) {
+    const names = ["Trading view -D", "Delta ex -P", "exness -F"];
+    const types = ["Demo", "Personal", "Funding"];
+    const accounts = [];
+    for (let i = 0; i < names.length; i++) {
+      const acc = await Account.create({
         account_name: names[i],
         account_type: types[i],
         initial_balance: 10000,
@@ -77,10 +88,13 @@ async function ensureAccounts() {
         }),
       });
       console.log("Created account:", acc.account_name);
+      accounts.push(acc);
     }
-    accounts.push(acc);
+    return accounts;
   }
-  return accounts;
+  
+  console.log(`Found ${existingAccounts.length} existing account(s) in database`);
+  return existingAccounts;
 }
 
 async function ensureStrategies() {
@@ -160,8 +174,12 @@ function buildDummyTrade(index, accounts, strategies, startTradeNum) {
     Trade_grade: pick(tradeGrades),
   });
 
-  const tags = [pick(tagPool)];
-  if (index % 2 === 0) tags.push(pick(tagPool));
+  // Generate varied random tags (1-4 tags per trade)
+  const numTags = randomInt(1, 4);
+  const tags = [];
+  for (let i = 0; i < numTags; i++) {
+    tags.push(pick(tagPool));
+  }
   const uniqueTags = [...new Set(tags)];
 
   return {
@@ -211,7 +229,7 @@ async function run() {
   if (strategies.length === 0) throw new Error("Need at least one strategy");
 
   const startNum = await getNextTradeNumber();
-  const count = Number(process.env.SEED_COUNT) || 100;
+  const count = 100; // Always generate exactly 100 trades
   const trades = [];
   for (let i = 0; i < count; i++) {
     trades.push(buildDummyTrade(i, accounts, strategies, startNum));
@@ -219,6 +237,8 @@ async function run() {
 
   await Trade.insertMany(trades);
   console.log(`Inserted ${trades.length} dummy trades (trd-${startNum} to trd-${startNum + count - 1}) over last 6 months.`);
+  console.log(`Strategies used: ${strategies.map(s => s.strategy_name).join(", ")}`);
+  console.log(`Accounts used: ${accounts.map(a => a.account_name).join(", ")}`);
   console.log("Trade Features order in DB:", TRADE_FEATURE_ORDER.join(" → "));
   await mongoose.disconnect();
   process.exit(0);

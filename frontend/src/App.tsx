@@ -26,12 +26,12 @@ import {
   Filter,
   Plus,
   Trash2,
-  Upload,
   ArrowLeft,
   Minimize2,
   Maximize2,
   User,
   Settings,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   createTrade,
@@ -290,12 +290,6 @@ function App() {
   const [dateRange, setDateRange] = useState("All time");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
-  const [analyticsView, setAnalyticsView] = useState({
-    equityCurve: "maximized" as "normal" | "minimized" | "maximized",
-    tradeOutcomes: "maximized" as "normal" | "minimized" | "maximized",
-    sessionPerformance: "maximized" as "normal" | "minimized" | "maximized",
-    setupQuality: "maximized" as "normal" | "minimized" | "maximized",
-  });
   const [accountScopes, setAccountScopes] = useState({
     totalPnL: "all",
     winRate: "all",
@@ -308,11 +302,23 @@ function App() {
     calendar: "all",
   });
   const [strategyScopes, setStrategyScopes] = useState({
+    totalPnL: "all",
+    winRate: "all",
+    avgRR: "all",
+    avgHolding: "all",
+    equityCurve: "all",
     tradeOutcomes: "all",
+    sessionPerformance: "all",
     setupQuality: "all",
+    calendar: "all",
   });
+  const [accountDashboard, setAccountDashboard] = useState("all");
+  const [strategyDashboard, setStrategyDashboard] = useState("all");
+  const [dateRangeDashboard, setDateRangeDashboard] = useState("All time");
+  const [customDateFromDashboard, setCustomDateFromDashboard] = useState("");
+  const [customDateToDashboard, setCustomDateToDashboard] = useState("");
   const [activeView, setActiveView] = useState<
-    "dashboard" | "new-trade" | "new-account" | "new-strategy" | "settings"
+    "dashboard" | "dashboard-page" | "new-trade" | "new-account" | "new-strategy" | "settings"
   >("dashboard");
   const [settingsSection, setSettingsSection] = useState<"themes" | "settings">(
     "themes",
@@ -839,7 +845,7 @@ function App() {
   const accountNameSuffix: Record<string, string> = {
     Demo: "-D",
     Personal: "-P",
-    Funding: "-F",
+    Funded: "-F",
   };
 
   const handleAccountSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1055,6 +1061,10 @@ function App() {
       accountName === "all"
         ? list
         : list.filter((trade) => trade.account_name === accountName);
+    const withStrategy = (list: Trade[], strategyName: string) =>
+      strategyName === "all"
+        ? list
+        : list.filter((trade) => trade.strategy === strategyName);
     const prevRange = (): { start: number; end: number } => {
       const now = new Date();
       if (dateRange === "Today") {
@@ -1098,11 +1108,26 @@ function App() {
         return ts >= prevWindow.start && ts < prevWindow.end;
       });
 
-    const totalTrades = withAccount(withRange(trades), accountScopes.totalPnL);
-    const prevTrades = withAccount(withPrevRange(trades), accountScopes.totalPnL);
-    const winTrades = withAccount(withRange(trades), accountScopes.winRate);
-    const rrTrades = withAccount(withRange(trades), accountScopes.avgRR);
-    const holdingTrades = withAccount(withRange(trades), accountScopes.avgHolding);
+    const totalTrades = withStrategy(
+      withAccount(withRange(trades), accountScopes.totalPnL),
+      strategyScopes.totalPnL
+    );
+    const prevTrades = withStrategy(
+      withAccount(withPrevRange(trades), accountScopes.totalPnL),
+      strategyScopes.totalPnL
+    );
+    const winTrades = withStrategy(
+      withAccount(withRange(trades), accountScopes.winRate),
+      strategyScopes.winRate
+    );
+    const rrTrades = withStrategy(
+      withAccount(withRange(trades), accountScopes.avgRR),
+      strategyScopes.avgRR
+    );
+    const holdingTrades = withStrategy(
+      withAccount(withRange(trades), accountScopes.avgHolding),
+      strategyScopes.avgHolding
+    );
 
     const totalPnL = totalTrades.reduce((sum, trade) => sum + trade.pnl, 0);
     const prevPnL = prevTrades.reduce((sum, trade) => sum + trade.pnl, 0);
@@ -1137,7 +1162,7 @@ function App() {
       winCount: wins,
       winTradesTotal: winTrades.length,
     };
-  }, [trades, dateRange, customDateFrom, customDateTo, accountScopes]);
+  }, [trades, dateRange, customDateFrom, customDateTo, accountScopes, strategyScopes]);
 
   const themeOptions = [
     { value: "emerald-ember", label: "Emerald Ember" },
@@ -1216,19 +1241,64 @@ function App() {
     });
   }, [trades, rangeStart, rangeEnd]);
 
+  const rangeStartDashboard = useMemo(() => {
+    const now = new Date();
+    if (dateRangeDashboard === "Today")
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (dateRangeDashboard === "Last 7 days")
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    if (dateRangeDashboard === "Last 15 days")
+      return new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+    if (dateRangeDashboard === "Last 30 days")
+      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (dateRangeDashboard === "This month")
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    if (dateRangeDashboard === "This year")
+      return new Date(now.getFullYear(), 0, 1);
+    if (dateRangeDashboard === "Custom" && customDateFromDashboard)
+      return new Date(customDateFromDashboard);
+    return null;
+  }, [dateRangeDashboard, customDateFromDashboard]);
+
+  const rangeEndDashboard = useMemo(() => {
+    if (dateRangeDashboard === "Today") {
+      const now = new Date();
+      const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return todayEnd;
+    }
+    if (dateRangeDashboard !== "Custom" || !customDateToDashboard) return null;
+    const d = new Date(customDateToDashboard);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }, [dateRangeDashboard, customDateToDashboard]);
+
+  const dateFilteredTradesDashboard = useMemo(() => {
+    if (!rangeStartDashboard && !rangeEndDashboard) return trades;
+    return trades.filter((trade) => {
+      const t = parseTradeDate(trade.start_datetime_raw).getTime();
+      if (rangeStartDashboard && t < rangeStartDashboard.getTime()) return false;
+      if (rangeEndDashboard && t > rangeEndDashboard.getTime()) return false;
+      return true;
+    });
+  }, [trades, rangeStartDashboard, rangeEndDashboard]);
+
   const equityTrades = useMemo(() => {
-    const scoped =
+    const byAccount =
       accountScopes.equityCurve === "all"
         ? dateFilteredTrades
         : dateFilteredTrades.filter(
             (trade) => trade.account_name === accountScopes.equityCurve
           );
+    const scoped =
+      strategyScopes.equityCurve === "all"
+        ? byAccount
+        : byAccount.filter((trade) => trade.strategy === strategyScopes.equityCurve);
     return [...scoped].sort(
       (a, b) =>
         parseTradeDate(a.start_datetime_raw).getTime() -
         parseTradeDate(b.start_datetime_raw).getTime()
     );
-  }, [dateFilteredTrades, accountScopes.equityCurve]);
+  }, [dateFilteredTrades, accountScopes.equityCurve, strategyScopes.equityCurve]);
 
   const equitySeries = useMemo(() => {
     return equityTrades.reduce<{ name: string; time: number; equity: number }[]>(
@@ -1337,12 +1407,16 @@ function App() {
   }, [outcomeTrades]);
 
   const sessionTrades = useMemo(() => {
-    return accountScopes.sessionPerformance === "all"
-      ? dateFilteredTrades
-      : dateFilteredTrades.filter(
-          (trade) => trade.account_name === accountScopes.sessionPerformance
-        );
-  }, [dateFilteredTrades, accountScopes.sessionPerformance]);
+    const byAccount =
+      accountScopes.sessionPerformance === "all"
+        ? dateFilteredTrades
+        : dateFilteredTrades.filter(
+            (trade) => trade.account_name === accountScopes.sessionPerformance
+          );
+    return strategyScopes.sessionPerformance === "all"
+      ? byAccount
+      : byAccount.filter((trade) => trade.strategy === strategyScopes.sessionPerformance);
+  }, [dateFilteredTrades, accountScopes.sessionPerformance, strategyScopes.sessionPerformance]);
 
   const sessionData = availableSessions.length
     ? availableSessions.map((session) => ({
@@ -1357,6 +1431,152 @@ function App() {
         },
         { name: "Asia", value: sessionTrades.filter((t) => t.session === "Asia").length },
       ];
+
+  const equityTradesDashboard = useMemo(() => {
+    const byAccount =
+      accountDashboard === "all"
+        ? dateFilteredTradesDashboard
+        : dateFilteredTradesDashboard.filter(
+            (trade) => trade.account_name === accountDashboard
+          );
+    const scoped =
+      strategyDashboard === "all"
+        ? byAccount
+        : byAccount.filter((trade) => trade.strategy === strategyDashboard);
+    return [...scoped].sort(
+      (a, b) =>
+        parseTradeDate(a.start_datetime_raw).getTime() -
+        parseTradeDate(b.start_datetime_raw).getTime()
+    );
+  }, [dateFilteredTradesDashboard, accountDashboard, strategyDashboard]);
+
+  const equitySeriesDashboard = useMemo(() => {
+    return equityTradesDashboard.reduce<{ name: string; time: number; equity: number }[]>(
+      (acc, trade, index) => {
+        const prev = index === 0 ? 0 : acc[index - 1].equity;
+        const next = prev + trade.pnl;
+        const dateStr = trade.start_datetime.split(" ")[0];
+        const time = parseTradeDate(trade.start_datetime_raw).getTime();
+        acc.push({ name: dateStr, time, equity: next });
+        return acc;
+      },
+      []
+    );
+  }, [equityTradesDashboard]);
+
+  const outcomeTradesDashboard = useMemo(() => {
+    const byAccount = dateFilteredTradesDashboard.filter(
+      (trade) =>
+        accountDashboard === "all" || trade.account_name === accountDashboard
+    );
+    if (strategyDashboard === "all") return byAccount;
+    return byAccount.filter((trade) => trade.strategy === strategyDashboard);
+  }, [dateFilteredTradesDashboard, accountDashboard, strategyDashboard]);
+
+  const outcomeMetricsDashboard = useMemo(() => {
+    if (outcomeTradesDashboard.length === 0)
+      return { bestStrategy: "—", profitFactor: null as number | null, expectancy: null as number | null };
+    const totalPnL = outcomeTradesDashboard.reduce((s, t) => s + t.pnl, 0);
+    const wins = outcomeTradesDashboard.filter((t) => t.pnl > 0);
+    const losses = outcomeTradesDashboard.filter((t) => t.pnl < 0);
+    const grossProfit = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    const profitFactor =
+      grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+    const expectancy = totalPnL / outcomeTradesDashboard.length;
+    const byStrategy = new Map<string, number>();
+    for (const t of outcomeTradesDashboard) {
+      const s = t.strategy || "—";
+      byStrategy.set(s, (byStrategy.get(s) ?? 0) + t.pnl);
+    }
+    let bestStrategy = "—";
+    let bestPnL = -Infinity;
+    byStrategy.forEach((pnl, name) => {
+      if (pnl > bestPnL) {
+        bestPnL = pnl;
+        bestStrategy = name;
+      }
+    });
+    return {
+      bestStrategy,
+      profitFactor: grossProfit === 0 && grossLoss === 0 ? null : profitFactor,
+      expectancy,
+    };
+  }, [outcomeTradesDashboard]);
+
+  const winLossDataDashboard = useMemo(() => {
+    const wins = outcomeTradesDashboard.filter((t) => t.pnl > 0);
+    const losses = outcomeTradesDashboard.filter((t) => t.pnl <= 0);
+    const winsProfit = wins.reduce((sum, t) => sum + t.pnl, 0);
+    const lossesProfit = losses.reduce((sum, t) => sum + t.pnl, 0);
+    return [
+      { name: "Wins", value: wins.length, profit: winsProfit },
+      { name: "Losses", value: losses.length, profit: lossesProfit },
+    ];
+  }, [outcomeTradesDashboard]);
+
+  const sessionTradesDashboard = useMemo(() => {
+    const byAccount =
+      accountDashboard === "all"
+        ? dateFilteredTradesDashboard
+        : dateFilteredTradesDashboard.filter(
+            (trade) => trade.account_name === accountDashboard
+          );
+    return strategyDashboard === "all"
+      ? byAccount
+      : byAccount.filter((trade) => trade.strategy === strategyDashboard);
+  }, [dateFilteredTradesDashboard, accountDashboard, strategyDashboard]);
+
+  const sessionDataDashboard = availableSessions.length
+    ? availableSessions.map((session) => ({
+        name: session,
+        value: sessionTradesDashboard.filter((t) => t.session === session).length,
+      }))
+    : [
+        { name: "London", value: sessionTradesDashboard.filter((t) => t.session === "London").length },
+        {
+          name: "New York",
+          value: sessionTradesDashboard.filter((t) => t.session === "New York").length,
+        },
+        { name: "Asia", value: sessionTradesDashboard.filter((t) => t.session === "Asia").length },
+      ];
+
+  const setupQualityTradesDashboard = useMemo(() => {
+    const byAccount = dateFilteredTradesDashboard.filter(
+      (trade) =>
+        accountDashboard === "all" || trade.account_name === accountDashboard
+    );
+    const withStrategy =
+      strategyDashboard === "all"
+        ? byAccount
+        : byAccount.filter(
+            (trade) => trade.strategy === strategyDashboard
+          );
+    return [...withStrategy].sort(
+      (a, b) =>
+        new Date(a.start_datetime_raw).getTime() -
+        new Date(b.start_datetime_raw).getTime()
+    );
+  }, [dateFilteredTradesDashboard, accountDashboard, strategyDashboard]);
+
+  const topSetupsLabelDashboard = useMemo(() => {
+    if (setupQualityTradesDashboard.length === 0) return "—";
+    const byStrategy = new Map<string, { wins: number; total: number }>();
+    setupQualityTradesDashboard.forEach((t) => {
+      const cur = byStrategy.get(t.strategy) ?? { wins: 0, total: 0 };
+      cur.total += 1;
+      if (t.pnl > 0) cur.wins += 1;
+      byStrategy.set(t.strategy, cur);
+    });
+    const sorted = [...byStrategy.entries()]
+      .filter(([, v]) => v.total > 0)
+      .sort((a, b) => b[1].wins - a[1].wins);
+    if (sorted.length === 0) return "—";
+    return sorted
+      .slice(0, 3)
+      .map(([name]) => name)
+      .join(" · ");
+  }, [setupQualityTradesDashboard]);
 
   const calendarMonthStart = useMemo(
     () => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1),
@@ -1373,10 +1593,14 @@ function App() {
     return `${y}-${m}-${d}`;
   };
   const calendarStats = useMemo(() => {
-    const scopedTrades =
+    const byAccount =
       accountScopes.calendar === "all"
         ? trades
         : trades.filter((trade) => trade.account_name === accountScopes.calendar);
+    const scopedTrades =
+      strategyScopes.calendar === "all"
+        ? byAccount
+        : byAccount.filter((trade) => trade.strategy === strategyScopes.calendar);
     const map = new Map<string, { pnl: number; count: number }>();
     let totalPnL = 0;
     let totalTrades = 0;
@@ -1397,7 +1621,7 @@ function App() {
       totalTrades += 1;
     });
     return { map, totalPnL, totalTrades };
-  }, [trades, calendarMonthStart, accountScopes.calendar]);
+  }, [trades, calendarMonthStart, accountScopes.calendar, strategyScopes.calendar]);
   const calendarDays = useMemo(() => {
     const startDay = calendarMonthStart.getDay();
     const startOffset = (startDay + 6) % 7;
@@ -1656,11 +1880,7 @@ function App() {
                 <ArrowLeft size={16} /> Home
               </button>
             )}
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <button className={`flex items-center gap-2 ${btnSecondary}`}>
-                <Upload size={16} /> Import
-              </button>
-            </div>
+            <div className="flex flex-wrap items-center justify-end gap-3" />
           </header>
 
           {activeView === "dashboard" ? (
@@ -1707,6 +1927,35 @@ function App() {
                             className="!max-w-none !px-2 !py-1.5 text-[11px]"
                           />
                         </div>
+                        <div className="min-w-[170px]">
+                          <Dropdown
+                            value={strategyScopes.totalPnL}
+                            onChange={(v) =>
+                              setStrategyScopes((prev) => ({
+                                ...prev,
+                                totalPnL: v,
+                                winRate: v,
+                                avgRR: v,
+                                avgHolding: v,
+                                equityCurve: v,
+                                tradeOutcomes: v,
+                                sessionPerformance: v,
+                                setupQuality: v,
+                                calendar: v,
+                              }))
+                            }
+                            options={[
+                              { value: "all", label: "All Strategies" },
+                              ...strategies.map((strategy) => ({
+                                value: strategy.strategy_name,
+                                label: strategy.strategy_name,
+                              })),
+                            ]}
+                            disabled={filtersLoading}
+                            placeholder="All Strategies"
+                            className="!max-w-none !px-2 !py-1.5 text-[11px]"
+                          />
+                        </div>
                         <div className="min-w-[150px]">
                           <Dropdown
                             value={dateRange}
@@ -1737,7 +1986,7 @@ function App() {
                         )}
                       </div>
                     </div>
-                    <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
+                    <div className="mt-4 grid grid-cols-2 gap-3">
                       <div className="rounded-2xl border border-surface-800 bg-surface-900/70 p-4">
                         <div className="flex items-center justify-between text-xs text-slate-400">
                           <span>Total PnL</span>
@@ -1793,6 +2042,14 @@ function App() {
                     <div className="mt-4 space-y-3">
                       <button
                         type="button"
+                        onClick={() => setActiveView("dashboard-page")}
+                        className={`${btnSecondary} w-full flex items-center justify-center gap-2`}
+                      >
+                        <LayoutDashboard size={16} />
+                        Dashboard
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setActiveView("new-trade")}
                         className={`${btnSecondary} w-full`}
                       >
@@ -1818,434 +2075,6 @@ function App() {
                     </div>
                   </div>
                 </div>
-
-                <div className={`grid gap-6 ${analyticsView.equityCurve === "maximized" || analyticsView.tradeOutcomes === "maximized" ? "xl:grid-cols-1" : "xl:grid-cols-[2fr_1fr]"}`}>
-              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.equityCurve === "maximized" ? "xl:col-span-1" : analyticsView.equityCurve === "minimized" ? "" : ""}`}>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-400">PnL Over Time</p>
-                    <h2 className="text-lg font-semibold">Equity Curve</h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-500 shrink-0 text-right">
-                      Uses filters from Performance Metrics
-                    </p>
-                    {analyticsView.equityCurve === "minimized" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            equityCurve: "maximized",
-                            tradeOutcomes: prev.tradeOutcomes === "maximized" ? "maximized" : prev.tradeOutcomes,
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Maximize"
-                      >
-                        <Maximize2 size={16} />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            equityCurve: "minimized",
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Minimize"
-                      >
-                        <Minimize2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {analyticsView.equityCurve !== "minimized" && (
-                <div className="mt-6 h-96">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={equitySeries}>
-                      <XAxis
-                        dataKey="time"
-                        type="number"
-                        scale="time"
-                        domain={["dataMin", "dataMax"]}
-                        tick={{ fill: "#94A3B8", fontSize: 11 }}
-                        tickFormatter={(value) => {
-                          const d = new Date(value);
-                          return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
-                        }}
-                      />
-                      <YAxis
-                        tick={{ fill: "#94A3B8", fontSize: 11 }}
-                        tickFormatter={(value) => formatNumber(Number(value))}
-                      />
-                      <Tooltip
-                        cursor={false}
-                        labelFormatter={(value) => {
-                          const d = new Date(value);
-                          return isNaN(d.getTime()) ? value : d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
-                        }}
-                        formatter={(value) => formatNumber(Number(value))}
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid #1e293b",
-                          borderRadius: "12px",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="equity"
-                        stroke="#6366F1"
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                )}
-              </div>
-
-              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.tradeOutcomes === "maximized" ? "xl:col-span-1" : analyticsView.tradeOutcomes === "minimized" ? "" : ""}`}>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-400">Win/Loss Breakdown</p>
-                    <h2 className="text-lg font-semibold">Trade Outcomes</h2>
-                    {analyticsView.tradeOutcomes !== "minimized" && (
-                    <div className="mt-2 min-w-[170px]">
-                      <Dropdown
-                        value={strategyScopes.tradeOutcomes}
-                        onChange={(v) =>
-                          setStrategyScopes((prev) => ({
-                            ...prev,
-                            tradeOutcomes: v,
-                          }))
-                        }
-                        options={[
-                          { value: "all", label: "All Strategies" },
-                          ...strategies.map((strategy) => ({
-                            value: strategy.strategy_name,
-                            label: strategy.strategy_name,
-                          })),
-                        ]}
-                        disabled={filtersLoading}
-                        placeholder="All Strategies"
-                        className="!max-w-none !px-2 !py-1 text-xs"
-                      />
-                    </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-500 shrink-0 text-right">
-                      Uses filters from Performance Metrics
-                    </p>
-                    {analyticsView.tradeOutcomes === "minimized" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            tradeOutcomes: "maximized",
-                            equityCurve: prev.equityCurve === "maximized" ? "maximized" : prev.equityCurve,
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Maximize"
-                      >
-                        <Maximize2 size={16} />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            tradeOutcomes: "minimized",
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Minimize"
-                      >
-                        <Minimize2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {analyticsView.tradeOutcomes !== "minimized" && (
-                <>
-                <div className="mt-6 h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={winLossData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={55}
-                        outerRadius={80}
-                        paddingAngle={4}
-                      >
-                        {winLossData.map((_, index) => (
-                          <Cell key={index} fill={pieColors[index]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        cursor={false}
-                        formatter={(value, name, props) => {
-                          const data = props.payload as { profit?: number };
-                          const count = formatNumber(Number(value));
-                          const profit = data.profit !== undefined ? formatNumber(data.profit) : "0.000";
-                          const profitSign = data.profit !== undefined && data.profit >= 0 ? "+" : "";
-                          return `${count} (Profit: ${profitSign}${profit})`;
-                        }}
-                        labelFormatter={(name) => name}
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid #1e293b",
-                          borderRadius: "12px",
-                          color: "#ffffff",
-                        }}
-                        itemStyle={{
-                          color: "#ffffff",
-                        }}
-                        labelStyle={{
-                          color: "#ffffff",
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-6 space-y-2 text-sm text-slate-300">
-                  <div className="flex items-center justify-between">
-                    <span>Best Strategy</span>
-                    <span className="font-semibold">{outcomeMetrics.bestStrategy}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Profit Factor</span>
-                    <span
-                      className={`font-semibold ${
-                        outcomeMetrics.profitFactor != null &&
-                        outcomeMetrics.profitFactor > 1
-                          ? "text-emerald-400"
-                          : ""
-                      }`}
-                    >
-                      {outcomeMetrics.profitFactor == null
-                        ? "—"
-                        : outcomeMetrics.profitFactor === Infinity
-                          ? "∞"
-                          : outcomeMetrics.profitFactor.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>Expectancy</span>
-                    <span
-                      className={`font-semibold ${
-                        outcomeMetrics.expectancy != null
-                          ? outcomeMetrics.expectancy >= 0
-                            ? "text-emerald-400"
-                            : "text-red-400"
-                          : ""
-                      }`}
-                    >
-                      {outcomeMetrics.expectancy != null
-                        ? `$${outcomeMetrics.expectancy.toFixed(2)}`
-                        : "—"}
-                    </span>
-                  </div>
-                </div>
-                </>
-                )}
-              </div>
-            </div>
-
-            <div className={`grid gap-6 ${analyticsView.sessionPerformance === "maximized" || analyticsView.setupQuality === "maximized" ? "xl:grid-cols-1" : "xl:grid-cols-[1.2fr_1fr]"}`}>
-              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.sessionPerformance === "maximized" ? "xl:col-span-1" : analyticsView.sessionPerformance === "minimized" ? "" : ""}`}>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-400">Session Performance</p>
-                    <h2 className="text-lg font-semibold">Trades by Session</h2>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-500 shrink-0 text-right">
-                      Uses filters from Performance Metrics
-                    </p>
-                    {analyticsView.sessionPerformance === "minimized" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            sessionPerformance: "maximized",
-                            setupQuality: prev.setupQuality === "maximized" ? "maximized" : prev.setupQuality,
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Maximize"
-                      >
-                        <Maximize2 size={16} />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            sessionPerformance: "minimized",
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Minimize"
-                      >
-                        <Minimize2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {analyticsView.sessionPerformance !== "minimized" && (
-                <div className="mt-5 h-96">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={sessionData}>
-                      <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
-                      <YAxis
-                        tick={{ fill: "#94A3B8", fontSize: 11 }}
-                        tickFormatter={(value) => formatInteger(Number(value))}
-                      />
-                      <Tooltip
-                        cursor={false}
-                        formatter={(value) => formatInteger(Number(value))}
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid #1e293b",
-                          borderRadius: "12px",
-                        }}
-                      />
-                      <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#6366F1" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                )}
-              </div>
-
-              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.setupQuality === "maximized" ? "xl:col-span-1" : analyticsView.setupQuality === "minimized" ? "" : ""}`}>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-400">Risk vs Reward</p>
-                    <h2 className="text-lg font-semibold">Setup Quality</h2>
-                    {analyticsView.setupQuality !== "minimized" && (
-                    <div className="mt-2 min-w-[170px]">
-                      <Dropdown
-                        value={strategyScopes.setupQuality}
-                        onChange={(v) =>
-                          setStrategyScopes((prev) => ({
-                            ...prev,
-                            setupQuality: v,
-                          }))
-                        }
-                        options={[
-                          { value: "all", label: "All Strategies" },
-                          ...strategies.map((strategy) => ({
-                            value: strategy.strategy_name,
-                            label: strategy.strategy_name,
-                          })),
-                        ]}
-                        disabled={filtersLoading}
-                        placeholder="All Strategies"
-                        className="!max-w-none !px-2 !py-1 text-xs"
-                      />
-                    </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-slate-500 shrink-0 text-right">
-                      Uses filters from Performance Metrics
-                    </p>
-                    {analyticsView.setupQuality === "minimized" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            setupQuality: "maximized",
-                            sessionPerformance: prev.sessionPerformance === "maximized" ? "maximized" : prev.sessionPerformance,
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Maximize"
-                      >
-                        <Maximize2 size={16} />
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAnalyticsView((prev) => ({
-                            ...prev,
-                            setupQuality: "minimized",
-                          }));
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
-                        title="Minimize"
-                      >
-                        <Minimize2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {analyticsView.setupQuality !== "minimized" && (
-                <>
-                <div className="mt-5 h-96">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={setupQualityTrades}>
-                      <XAxis
-                        dataKey="trade_id"
-                        tick={{ fill: "#94A3B8", fontSize: 10 }}
-                        tickFormatter={(value) => {
-                          const m = String(value).match(/trd-(\d+)/i);
-                          return m ? m[1] : value;
-                        }}
-                      />
-                      <YAxis
-                        tick={{ fill: "#94A3B8", fontSize: 11 }}
-                        tickFormatter={(value) => formatNumber(Number(value))}
-                      />
-                      <Tooltip
-                        cursor={false}
-                        formatter={(value) => formatNumber(Number(value))}
-                        contentStyle={{
-                          background: "#0f172a",
-                          border: "1px solid #1e293b",
-                          borderRadius: "12px",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="actual_risk_reward"
-                        name="Actual RR"
-                        stroke="#22C55E"
-                        strokeWidth={2}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="expected_risk_reward"
-                        name="Expected RR"
-                        stroke="#F59E0B"
-                        strokeWidth={2}
-                        strokeDasharray="4 4"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-5 flex items-center justify-between rounded-2xl border border-surface-700 bg-surface-800/70 px-4 py-3 text-xs text-slate-300">
-                  <span>Top Setups</span>
-                  <span className="font-semibold text-white">
-                    {topSetupsLabel}
-                  </span>
-                </div>
-                </>
-                )}
-              </div>
-            </div>
 
                 <div className="w-full">
                   <CalendarPanel compact showExpand />
@@ -2351,20 +2180,19 @@ function App() {
                       <th className="px-4 py-3">Strategy</th>
                       <th className="px-4 py-3 text-right">R:R</th>
                       <th className="px-4 py-3 text-right">PnL</th>
-                      <th className="px-4 py-3">Tags</th>
                       <th className="w-10 px-4 py-3" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
                     {tradesLoading ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                           Loading trades…
                         </td>
                       </tr>
                     ) : filteredTrades.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                        <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                           No trades yet. Add one with <strong className="text-slate-300">New Trade</strong> or check filters.
                         </td>
                       </tr>
@@ -2403,18 +2231,6 @@ function App() {
                         >
                           {trade.pnl >= 0 ? "+" : ""}
                           {trade.pnl.toFixed(3)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
-                            {trade.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded-full border border-surface-700 bg-surface-800/70 px-2 py-1 text-xs text-slate-300"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <button
@@ -2525,6 +2341,294 @@ function App() {
                 </div>
               </div>
             </section>
+          ) : activeView === "dashboard-page" ? (
+            <section className="space-y-6 px-6 py-6">
+              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-surface-800 pb-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                      Analytics
+                    </p>
+                    <h2 className="text-lg font-semibold">Dashboard</h2>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Charts are filtered by the controls below. Independent from Home performance metrics.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-[170px]">
+                      <Dropdown
+                        value={accountDashboard}
+                        onChange={(v) => setAccountDashboard(v)}
+                        options={[
+                          { value: "all", label: "All Accounts" },
+                          ...accounts.map((account) => ({
+                            value: account.account_name,
+                            label: account.account_name,
+                          })),
+                        ]}
+                        disabled={filtersLoading}
+                        placeholder="All Accounts"
+                        className="!max-w-none !px-2 !py-1.5 text-[11px]"
+                      />
+                    </div>
+                    <div className="min-w-[170px]">
+                      <Dropdown
+                        value={strategyDashboard}
+                        onChange={(v) => setStrategyDashboard(v)}
+                        options={[
+                          { value: "all", label: "All Strategies" },
+                          ...strategies.map((strategy) => ({
+                            value: strategy.strategy_name,
+                            label: strategy.strategy_name,
+                          })),
+                        ]}
+                        disabled={filtersLoading}
+                        placeholder="All Strategies"
+                        className="!max-w-none !px-2 !py-1.5 text-[11px]"
+                      />
+                    </div>
+                    <div className="min-w-[150px]">
+                      <Dropdown
+                        value={dateRangeDashboard}
+                        onChange={(v) => setDateRangeDashboard(v)}
+                        options={dateRangeOptions}
+                        placeholder="Date range"
+                        className="!max-w-none !px-2 !py-1.5 text-[11px]"
+                      />
+                    </div>
+                    {dateRangeDashboard === "Custom" && (
+                      <>
+                        <input
+                          type="date"
+                          value={customDateFromDashboard}
+                          onChange={(e) => setCustomDateFromDashboard(e.target.value)}
+                          className="rounded-xl border border-surface-700/60 bg-surface-900/70 px-2 py-1.5 text-[11px] text-white focus:outline-none"
+                          title="From date"
+                        />
+                        <span className="text-slate-500">to</span>
+                        <input
+                          type="date"
+                          value={customDateToDashboard}
+                          onChange={(e) => setCustomDateToDashboard(e.target.value)}
+                          className="rounded-xl border border-surface-700/60 bg-surface-900/70 px-2 py-1.5 text-[11px] text-white focus:outline-none"
+                          title="To date"
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                  <p className="text-sm text-slate-400">PnL Over Time</p>
+                  <h2 className="text-lg font-semibold">Equity Curve</h2>
+                  <div className="mt-6 h-96">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={equitySeriesDashboard}>
+                        <XAxis
+                          dataKey="time"
+                          type="number"
+                          scale="time"
+                          domain={["dataMin", "dataMax"]}
+                          tick={{ fill: "#94A3B8", fontSize: 11 }}
+                          tickFormatter={(value) => {
+                            const d = new Date(value);
+                            return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+                          }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#94A3B8", fontSize: 11 }}
+                          tickFormatter={(value) => formatNumber(Number(value))}
+                        />
+                        <Tooltip
+                          cursor={false}
+                          labelFormatter={(value) => {
+                            const d = new Date(value);
+                            return isNaN(d.getTime()) ? value : d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+                          }}
+                          formatter={(value) => formatNumber(Number(value))}
+                          contentStyle={{
+                            background: "#0f172a",
+                            border: "1px solid #1e293b",
+                            borderRadius: "12px",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="equity"
+                          stroke="#6366F1"
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                  <p className="text-sm text-slate-400">Win/Loss Breakdown</p>
+                  <h2 className="text-lg font-semibold">Trade Outcomes</h2>
+                  <div className="mt-6 h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={winLossDataDashboard}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={55}
+                          outerRadius={80}
+                          paddingAngle={4}
+                        >
+                          {winLossDataDashboard.map((_, index) => (
+                            <Cell key={index} fill={pieColors[index]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          cursor={false}
+                          formatter={(value, name, props) => {
+                            const data = props.payload as { profit?: number };
+                            const count = formatNumber(Number(value));
+                            const profit = data.profit !== undefined ? formatNumber(data.profit) : "0.000";
+                            const profitSign = data.profit !== undefined && data.profit >= 0 ? "+" : "";
+                            return `${count} (Profit: ${profitSign}${profit})`;
+                          }}
+                          labelFormatter={(name) => name}
+                          contentStyle={{
+                            background: "#0f172a",
+                            border: "1px solid #1e293b",
+                            borderRadius: "12px",
+                            color: "#ffffff",
+                          }}
+                          itemStyle={{ color: "#ffffff" }}
+                          labelStyle={{ color: "#ffffff" }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-6 space-y-2 text-sm text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span>Best Strategy</span>
+                      <span className="font-semibold">{outcomeMetricsDashboard.bestStrategy}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Profit Factor</span>
+                      <span
+                        className={`font-semibold ${
+                          outcomeMetricsDashboard.profitFactor != null &&
+                          outcomeMetricsDashboard.profitFactor > 1
+                            ? "text-emerald-400"
+                            : ""
+                        }`}
+                      >
+                        {outcomeMetricsDashboard.profitFactor == null
+                          ? "—"
+                          : outcomeMetricsDashboard.profitFactor === Infinity
+                            ? "∞"
+                            : outcomeMetricsDashboard.profitFactor.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Expectancy</span>
+                      <span
+                        className={`font-semibold ${
+                          outcomeMetricsDashboard.expectancy != null
+                            ? outcomeMetricsDashboard.expectancy >= 0
+                              ? "text-emerald-400"
+                              : "text-red-400"
+                            : ""
+                        }`}
+                      >
+                        {outcomeMetricsDashboard.expectancy != null
+                          ? `$${outcomeMetricsDashboard.expectancy.toFixed(2)}`
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                  <p className="text-sm text-slate-400">Session Performance</p>
+                  <h2 className="text-lg font-semibold">Trades by Session</h2>
+                  <div className="mt-5 h-96">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={sessionDataDashboard}>
+                        <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                        <YAxis
+                          tick={{ fill: "#94A3B8", fontSize: 11 }}
+                          tickFormatter={(value) => formatInteger(Number(value))}
+                        />
+                        <Tooltip
+                          cursor={false}
+                          formatter={(value) => formatInteger(Number(value))}
+                          contentStyle={{
+                            background: "#0f172a",
+                            border: "1px solid #1e293b",
+                            borderRadius: "12px",
+                          }}
+                        />
+                        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#6366F1" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                  <p className="text-sm text-slate-400">Risk vs Reward</p>
+                  <h2 className="text-lg font-semibold">Setup Quality</h2>
+                  <div className="mt-5 h-96">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={setupQualityTradesDashboard}>
+                        <XAxis
+                          dataKey="trade_id"
+                          tick={{ fill: "#94A3B8", fontSize: 10 }}
+                          tickFormatter={(value) => {
+                            const m = String(value).match(/trd-(\d+)/i);
+                            return m ? m[1] : value;
+                          }}
+                        />
+                        <YAxis
+                          tick={{ fill: "#94A3B8", fontSize: 11 }}
+                          tickFormatter={(value) => formatNumber(Number(value))}
+                        />
+                        <Tooltip
+                          cursor={false}
+                          formatter={(value) => formatNumber(Number(value))}
+                          contentStyle={{
+                            background: "#0f172a",
+                            border: "1px solid #1e293b",
+                            borderRadius: "12px",
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="actual_risk_reward"
+                          name="Actual RR"
+                          stroke="#22C55E"
+                          strokeWidth={2}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="expected_risk_reward"
+                          name="Expected RR"
+                          stroke="#F59E0B"
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-5 flex items-center justify-between rounded-2xl border border-surface-700 bg-surface-800/70 px-4 py-3 text-xs text-slate-300">
+                    <span>Top Setups</span>
+                    <span className="font-semibold text-white">
+                      {topSetupsLabelDashboard}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
           ) : activeView === "new-account" ? (
             <section className="px-6 py-6">
               <div className="rounded-3xl border border-surface-700 bg-surface-900/80 p-6 shadow-soft">
@@ -2578,13 +2682,13 @@ function App() {
                           options={[
                             { value: "Demo", label: "Demo" },
                             { value: "Personal", label: "Personal" },
-                            { value: "Funding", label: "Funding" },
+                            { value: "Funded", label: "Funded" },
                           ]}
                           placeholder="Select type"
                         />
                       </div>
                       <span className="mt-1 text-[11px] text-slate-500">
-                        Name will be saved with suffix: Demo &quot;-D&quot;, Personal &quot;-P&quot;, Funding &quot;-F&quot;
+                        Name will be saved with suffix: Demo &quot;-D&quot;, Personal &quot;-P&quot;, Funded &quot;-F&quot;
                       </span>
                     </label>
                     <label className="trade-form-field flex flex-col gap-2 text-sm">
