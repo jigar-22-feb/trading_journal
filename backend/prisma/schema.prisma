@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Trade {
+  trade_id               String         @id @default(cuid())
+  start_datetime         DateTime
+  end_datetime           DateTime?
+  trade_type             String
+  asset                  String
+  direction              String
+  timeframe              String
+  session                String
+  entry_candle_type      String?
+  strategy_id            String?
+  entry_price            Float
+  exit_price             Float?
+  risk_percentage        Float?
+  expected_risk_reward   Float?
+  actual_risk_reward     Float?
+  trend_multi_timeframe  Json?
+  take_profit            Float?
+  stop_loss              Float?
+  amount_traded          Float?
+  lot_size               Float?
+  leverage               Float?
+  trade_fees             Float?
+  pnl                    Float?
+  sl_moved_to_breakeven  Boolean        @default(false)
+  account_id             String?
+  balance_before_trade   Float?
+  balance_after_trade    Float?
+  increased_lot_size     Boolean        @default(false)
+  entry_reason           String?
+  exit_reason            String?
+  notes                  String?
+  custom_fields          Json?
+  created_at             DateTime       @default(now())
+  updated_at             DateTime       @updatedAt
+
+  strategy               Strategy?      @relation(fields: [strategy_id], references: [strategy_id])
+  account                Account?       @relation(fields: [account_id], references: [account_id])
+  tags                   TradeTag[]
+  images                 TradeImage[]
+
+  @@index([start_datetime])
+  @@index([strategy_id])
+  @@index([account_id])
+}
+
+model Strategy {
+  strategy_id     String           @id @default(cuid())
+  strategy_name   String
+  strategy_notes  String?
+  custom_fields   Json?
+  created_at      DateTime         @default(now())
+  updated_at      DateTime         @updatedAt
+
+  trades          Trade[]
+  images          StrategyImage[]
+}
+
+model Account {
+  account_id      String    @id @default(cuid())
+  account_name    String
+  account_balance Float?
+  account_type    String
+  created_at      DateTime  @default(now())
+
+  trades          Trade[]
+}
+
+model Tag {
+  tag_id    String     @id @default(cuid())
+  tag_name  String     @unique
+  trades    TradeTag[]
+}
+
+model TradeTag {
+  trade_id  String
+  tag_id    String
+
+  trade     Trade  @relation(fields: [trade_id], references: [trade_id])
+  tag       Tag    @relation(fields: [tag_id], references: [tag_id])
+
+  @@id([trade_id, tag_id])
+  @@index([tag_id])
+}
+
+model TradeImage {
+  image_id   String   @id @default(cuid())
+  trade_id   String
+  image_path String
+  uploaded_at DateTime @default(now())
+
+  trade      Trade    @relation(fields: [trade_id], references: [trade_id])
+
+  @@index([trade_id])
+}
+
+model StrategyImage {
+  image_id   String   @id @default(cuid())
+  strategy_id String
+  image_path String
+  uploaded_at DateTime @default(now())
+
+  strategy   Strategy @relation(fields: [strategy_id], references: [strategy_id])
+
+  @@index([strategy_id])
+}

@@ -1,0 +1,13 @@
+{
+  "name": "trading-journal",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n backend,frontend -c green,cyan \"npm:dev --prefix backend\" \"npm:dev --prefix frontend\"",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.1",
+    "concurrently": "^9.2.1"
+  }
+}
