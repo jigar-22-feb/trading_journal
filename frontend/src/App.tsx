@@ -317,8 +317,26 @@ function App() {
   const [dateRangeDashboard, setDateRangeDashboard] = useState("All time");
   const [customDateFromDashboard, setCustomDateFromDashboard] = useState("");
   const [customDateToDashboard, setCustomDateToDashboard] = useState("");
+  const [dashboardChartVisibility, setDashboardChartVisibility] = useState(() => {
+    const defaultVis = {
+      equityCurve: true,
+      tradeOutcomes: true,
+      sessionPerformance: true,
+      setupQuality: true,
+    };
+    try {
+      const stored = localStorage.getItem("tj-dashboard-chart-visibility");
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, boolean>;
+        return { ...defaultVis, ...parsed };
+      }
+    } catch {
+      // ignore
+    }
+    return defaultVis;
+  });
   const [activeView, setActiveView] = useState<
-    "dashboard" | "dashboard-page" | "new-trade" | "new-account" | "new-strategy" | "settings"
+    "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings"
   >("dashboard");
   const [settingsSection, setSettingsSection] = useState<"themes" | "settings">(
     "themes",
@@ -537,6 +555,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem("tj-tag-pool", JSON.stringify(tagPool));
   }, [tagPool]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "tj-dashboard-chart-visibility",
+        JSON.stringify(dashboardChartVisibility)
+      );
+    } catch {
+      // ignore
+    }
+  }, [dashboardChartVisibility]);
   const getNextTradeIdFromList = (items: Trade[]) => {
     const maxId = items.reduce((max, trade) => {
       const match = trade.trade_id.match(/trd-(\d+)/i);
@@ -1850,17 +1878,45 @@ function App() {
           </div>
           <div className="border-b border-slate-800/70 bg-surface-900/60 px-6 py-5 backdrop-blur">
             <div className="flex items-center justify-between gap-4">
-              <div className="w-6" aria-hidden="true" />
+              {activeView === "dashboard-page" ? (
+                <button
+                  onClick={() => setActiveView("dashboard")}
+                  className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
+                >
+                  <ArrowLeft size={16} /> Home
+                </button>
+              ) : activeView === "dashboard-settings" ? (
+                <button
+                  onClick={() => setActiveView("dashboard-page")}
+                  className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
+                >
+                  <ArrowLeft size={16} /> Back to Dashboard
+                </button>
+              ) : (
+                <div className="w-6" aria-hidden="true" />
+              )}
               <h1 className="flex-1 text-center text-2xl font-semibold">
-                Trading Journal
+                {activeView === "dashboard-settings"
+                  ? "Dashboard settings"
+                  : activeView === "dashboard-page"
+                    ? "Dashboard"
+                    : "Trading Journal"}
               </h1>
               <button
                 type="button"
-                onClick={() => setActiveView("settings")}
+                onClick={() => {
+                  if (activeView === "dashboard-page") setActiveView("dashboard-settings");
+                  else if (activeView === "dashboard-settings") setActiveView("dashboard-page");
+                  else setActiveView("settings");
+                }}
                 className="flex items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 p-2 text-slate-300 shadow-[0_10px_20px_rgba(0,0,0,0.25)] hover:bg-surface-800/80 transition"
-                title="User settings"
+                title={activeView === "dashboard-page" || activeView === "dashboard-settings" ? "Dashboard settings" : "User"}
               >
-                <User size={20} />
+                {activeView === "dashboard-page" || activeView === "dashboard-settings" ? (
+                  <Settings size={20} />
+                ) : (
+                  <User size={20} />
+                )}
               </button>
             </div>
           </div>
@@ -1872,14 +1928,14 @@ function App() {
               >
                 <Plus size={16} /> New Trade
               </button>
-            ) : (
+            ) : activeView !== "dashboard-page" && activeView !== "dashboard-settings" ? (
               <button
                 onClick={() => setActiveView("dashboard")}
                 className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
               >
                 <ArrowLeft size={16} /> Home
               </button>
-            )}
+            ) : null}
             <div className="flex flex-wrap items-center justify-end gap-3" />
           </header>
 
@@ -2344,14 +2400,7 @@ function App() {
           ) : activeView === "dashboard-page" ? (
             <section className="space-y-6 px-6 py-6">
               <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-surface-800 pb-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                      Analytics
-                    </p>
-                    <h2 className="text-lg font-semibold">Dashboard</h2>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <div className="min-w-[170px]">
                       <Dropdown
                         value={accountDashboard}
@@ -2412,11 +2461,11 @@ function App() {
                         />
                       </>
                     )}
-                  </div>
                 </div>
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+                {dashboardChartVisibility.equityCurve && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">PnL Over Time</p>
                   <h2 className="text-lg font-semibold">Equity Curve</h2>
@@ -2462,7 +2511,9 @@ function App() {
                     </ResponsiveContainer>
                   </div>
                 </div>
+                )}
 
+                {dashboardChartVisibility.tradeOutcomes && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Win/Loss Breakdown</p>
                   <h2 className="text-lg font-semibold">Trade Outcomes</h2>
@@ -2543,9 +2594,11 @@ function App() {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
+                {dashboardChartVisibility.sessionPerformance && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Session Performance</p>
                   <h2 className="text-lg font-semibold">Trades by Session</h2>
@@ -2571,7 +2624,9 @@ function App() {
                     </ResponsiveContainer>
                   </div>
                 </div>
+                )}
 
+                {dashboardChartVisibility.setupQuality && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Risk vs Reward</p>
                   <h2 className="text-lg font-semibold">Setup Quality</h2>
@@ -2624,6 +2679,45 @@ function App() {
                     </span>
                   </div>
                 </div>
+                )}
+              </div>
+            </section>
+          ) : activeView === "dashboard-settings" ? (
+            <section className="px-6 py-6">
+              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-2">
+                  Dashboard
+                </p>
+                <h2 className="text-lg font-semibold text-white mb-4">Visible charts</h2>
+                <p className="text-sm text-slate-400 mb-6">
+                  Choose which charts to show on the Dashboard page. Only selected charts will be visible.
+                </p>
+                <ul className="space-y-3">
+                  {[
+                    { id: "equityCurve" as const, label: "Equity Curve" },
+                    { id: "tradeOutcomes" as const, label: "Trade Outcomes" },
+                    { id: "sessionPerformance" as const, label: "Trades by Session" },
+                    { id: "setupQuality" as const, label: "Setup Quality" },
+                  ].map(({ id, label }) => (
+                    <li key={id} className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id={`chart-${id}`}
+                        checked={dashboardChartVisibility[id]}
+                        onChange={() =>
+                          setDashboardChartVisibility((prev) => ({
+                            ...prev,
+                            [id]: !prev[id],
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-500 focus:ring-accent-500/50"
+                      />
+                      <label htmlFor={`chart-${id}`} className="text-sm text-slate-200 cursor-pointer select-none">
+                        {label}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </section>
           ) : activeView === "new-account" ? (
