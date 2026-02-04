@@ -28,6 +28,10 @@ import {
   Trash2,
   Upload,
   ArrowLeft,
+  Minimize2,
+  Maximize2,
+  User,
+  Settings,
 } from "lucide-react";
 import {
   createTrade,
@@ -44,6 +48,7 @@ import { createStrategy } from "./api/strategies";
 import { getFilters } from "./api/analytics";
 
   const dateRangeOptions: { value: string; label: string }[] = [
+    { value: "Today", label: "Today" },
     { value: "Last 7 days", label: "Last 7 days" },
     { value: "Last 15 days", label: "Last 15 days" },
     { value: "Last 30 days", label: "Last 30 days" },
@@ -285,6 +290,12 @@ function App() {
   const [dateRange, setDateRange] = useState("All time");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
+  const [analyticsView, setAnalyticsView] = useState({
+    equityCurve: "maximized" as "normal" | "minimized" | "maximized",
+    tradeOutcomes: "maximized" as "normal" | "minimized" | "maximized",
+    sessionPerformance: "maximized" as "normal" | "minimized" | "maximized",
+    setupQuality: "maximized" as "normal" | "minimized" | "maximized",
+  });
   const [accountScopes, setAccountScopes] = useState({
     totalPnL: "all",
     winRate: "all",
@@ -301,8 +312,11 @@ function App() {
     setupQuality: "all",
   });
   const [activeView, setActiveView] = useState<
-    "dashboard" | "new-trade" | "new-account" | "new-strategy"
+    "dashboard" | "new-trade" | "new-account" | "new-strategy" | "settings"
   >("dashboard");
+  const [settingsSection, setSettingsSection] = useState<"themes" | "settings">(
+    "themes",
+  );
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [heroProgress, setHeroProgress] = useState(0);
@@ -995,6 +1009,10 @@ function App() {
     const parseTradeDate = (value: string) => new Date(value).getTime();
     const rangeFrom = (): number | null => {
       const now = new Date();
+      if (dateRange === "Today") {
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return todayStart.getTime();
+      }
       if (dateRange === "Last 7 days")
         return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
       if (dateRange === "Last 15 days")
@@ -1012,6 +1030,11 @@ function App() {
       return null;
     };
     const rangeTo = (): number | null => {
+      if (dateRange === "Today") {
+        const now = new Date();
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        return todayEnd.getTime();
+      }
       if (dateRange !== "Custom" || !customDateTo) return null;
       const d = new Date(customDateTo);
       d.setHours(23, 59, 59, 999);
@@ -1034,6 +1057,11 @@ function App() {
         : list.filter((trade) => trade.account_name === accountName);
     const prevRange = (): { start: number; end: number } => {
       const now = new Date();
+      if (dateRange === "Today") {
+        const yesterdayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999).getTime();
+        const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0).getTime();
+        return { start: yesterdayStart, end: yesterdayEnd };
+      }
       if (dateRange === "Last 7 days") {
         const end = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).getTime();
         const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).getTime();
@@ -1149,6 +1177,8 @@ function App() {
   const parseTradeDate = (value: string) => new Date(value);
   const rangeStart = useMemo(() => {
     const now = new Date();
+    if (dateRange === "Today")
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
     if (dateRange === "Last 7 days")
       return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     if (dateRange === "Last 15 days")
@@ -1165,6 +1195,11 @@ function App() {
   }, [dateRange, customDateFrom]);
 
   const rangeEnd = useMemo(() => {
+    if (dateRange === "Today") {
+      const now = new Date();
+      const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      return todayEnd;
+    }
     if (dateRange !== "Custom" || !customDateTo) return null;
     const d = new Date(customDateTo);
     d.setHours(23, 59, 59, 999);
@@ -1290,10 +1325,16 @@ function App() {
     };
   }, [outcomeTrades]);
 
-  const winLossData = [
-    { name: "Wins", value: outcomeTrades.filter((t) => t.pnl > 0).length },
-    { name: "Losses", value: outcomeTrades.filter((t) => t.pnl <= 0).length },
-  ];
+  const winLossData = useMemo(() => {
+    const wins = outcomeTrades.filter((t) => t.pnl > 0);
+    const losses = outcomeTrades.filter((t) => t.pnl <= 0);
+    const winsProfit = wins.reduce((sum, t) => sum + t.pnl, 0);
+    const lossesProfit = losses.reduce((sum, t) => sum + t.pnl, 0);
+    return [
+      { name: "Wins", value: wins.length, profit: winsProfit },
+      { name: "Losses", value: losses.length, profit: lossesProfit },
+    ];
+  }, [outcomeTrades]);
 
   const sessionTrades = useMemo(() => {
     return accountScopes.sessionPerformance === "all"
@@ -1583,8 +1624,21 @@ function App() {
             />
             <div className="absolute inset-0 bg-gradient-to-r from-surface-950/90 via-surface-900/60 to-transparent" />
           </div>
-          <div className="border-b border-slate-800/70 bg-surface-900/60 px-6 py-5 text-center backdrop-blur">
-            <h1 className="text-2xl font-semibold">Trading Journal</h1>
+          <div className="border-b border-slate-800/70 bg-surface-900/60 px-6 py-5 backdrop-blur">
+            <div className="flex items-center justify-between gap-4">
+              <div className="w-6" aria-hidden="true" />
+              <h1 className="flex-1 text-center text-2xl font-semibold">
+                Trading Journal
+              </h1>
+              <button
+                type="button"
+                onClick={() => setActiveView("settings")}
+                className="flex items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 p-2 text-slate-300 shadow-[0_10px_20px_rgba(0,0,0,0.25)] hover:bg-surface-800/80 transition"
+                title="User settings"
+              >
+                <User size={20} />
+              </button>
+            </div>
           </div>
           <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/70 bg-surface-900/40 px-6 py-4 backdrop-blur">
             {activeView === "dashboard" ? (
@@ -1599,24 +1653,10 @@ function App() {
                 onClick={() => setActiveView("dashboard")}
                 className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
               >
-                <ArrowLeft size={16} /> Back to Dashboard
+                <ArrowLeft size={16} /> Home
               </button>
             )}
             <div className="flex flex-wrap items-center justify-end gap-3">
-              <div className="flex items-center gap-2 rounded-2xl border border-surface-700/70 bg-surface-900/60 px-3 py-2 text-xs text-slate-300 shadow-[0_10px_20px_rgba(0,0,0,0.25)]">
-                <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                  Theme
-                </span>
-                <div className="min-w-[170px]">
-                  <Dropdown
-                    value={theme}
-                    onChange={(v) => setTheme(v)}
-                    options={themeOptions}
-                    placeholder="Select theme"
-                    className="!max-w-none !px-2 !py-1 text-xs"
-                  />
-                </div>
-              </div>
               <button className={`flex items-center gap-2 ${btnSecondary}`}>
                 <Upload size={16} /> Import
               </button>
@@ -1779,18 +1819,51 @@ function App() {
                   </div>
                 </div>
 
-                <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                <div className={`grid gap-6 ${analyticsView.equityCurve === "maximized" || analyticsView.tradeOutcomes === "maximized" ? "xl:grid-cols-1" : "xl:grid-cols-[2fr_1fr]"}`}>
+              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.equityCurve === "maximized" ? "xl:col-span-1" : analyticsView.equityCurve === "minimized" ? "" : ""}`}>
                 <div className="flex items-center justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-sm text-slate-400">PnL Over Time</p>
                     <h2 className="text-lg font-semibold">Equity Curve</h2>
                   </div>
-                  <p className="text-xs text-slate-500 shrink-0 text-right">
-                    Uses filters from Performance Metrics
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-slate-500 shrink-0 text-right">
+                      Uses filters from Performance Metrics
+                    </p>
+                    {analyticsView.equityCurve === "minimized" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            equityCurve: "maximized",
+                            tradeOutcomes: prev.tradeOutcomes === "maximized" ? "maximized" : prev.tradeOutcomes,
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Maximize"
+                      >
+                        <Maximize2 size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            equityCurve: "minimized",
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Minimize"
+                      >
+                        <Minimize2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-6 h-64">
+                {analyticsView.equityCurve !== "minimized" && (
+                <div className="mt-6 h-96">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={equitySeries}>
                       <XAxis
@@ -1831,13 +1904,15 @@ function App() {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </div>
 
-              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.tradeOutcomes === "maximized" ? "xl:col-span-1" : analyticsView.tradeOutcomes === "minimized" ? "" : ""}`}>
                 <div className="flex items-center justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-sm text-slate-400">Win/Loss Breakdown</p>
                     <h2 className="text-lg font-semibold">Trade Outcomes</h2>
+                    {analyticsView.tradeOutcomes !== "minimized" && (
                     <div className="mt-2 min-w-[170px]">
                       <Dropdown
                         value={strategyScopes.tradeOutcomes}
@@ -1859,12 +1934,47 @@ function App() {
                         className="!max-w-none !px-2 !py-1 text-xs"
                       />
                     </div>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500 shrink-0 text-right">
-                    Uses filters from Performance Metrics
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-slate-500 shrink-0 text-right">
+                      Uses filters from Performance Metrics
+                    </p>
+                    {analyticsView.tradeOutcomes === "minimized" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            tradeOutcomes: "maximized",
+                            equityCurve: prev.equityCurve === "maximized" ? "maximized" : prev.equityCurve,
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Maximize"
+                      >
+                        <Maximize2 size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            tradeOutcomes: "minimized",
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Minimize"
+                      >
+                        <Minimize2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-6 h-56">
+                {analyticsView.tradeOutcomes !== "minimized" && (
+                <>
+                <div className="mt-6 h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -1881,11 +1991,25 @@ function App() {
                       </Pie>
                       <Tooltip
                         cursor={false}
-                        formatter={(value) => formatNumber(Number(value))}
+                        formatter={(value, name, props) => {
+                          const data = props.payload as { profit?: number };
+                          const count = formatNumber(Number(value));
+                          const profit = data.profit !== undefined ? formatNumber(data.profit) : "0.000";
+                          const profitSign = data.profit !== undefined && data.profit >= 0 ? "+" : "";
+                          return `${count} (Profit: ${profitSign}${profit})`;
+                        }}
+                        labelFormatter={(name) => name}
                         contentStyle={{
                           background: "#0f172a",
                           border: "1px solid #1e293b",
                           borderRadius: "12px",
+                          color: "#ffffff",
+                        }}
+                        itemStyle={{
+                          color: "#ffffff",
+                        }}
+                        labelStyle={{
+                          color: "#ffffff",
                         }}
                       />
                     </PieChart>
@@ -1930,21 +2054,56 @@ function App() {
                     </span>
                   </div>
                 </div>
+                </>
+                )}
               </div>
             </div>
 
-            <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+            <div className={`grid gap-6 ${analyticsView.sessionPerformance === "maximized" || analyticsView.setupQuality === "maximized" ? "xl:grid-cols-1" : "xl:grid-cols-[1.2fr_1fr]"}`}>
+              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.sessionPerformance === "maximized" ? "xl:col-span-1" : analyticsView.sessionPerformance === "minimized" ? "" : ""}`}>
                 <div className="flex items-center justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-sm text-slate-400">Session Performance</p>
                     <h2 className="text-lg font-semibold">Trades by Session</h2>
                   </div>
-                  <p className="text-xs text-slate-500 shrink-0 text-right">
-                    Uses filters from Performance Metrics
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-slate-500 shrink-0 text-right">
+                      Uses filters from Performance Metrics
+                    </p>
+                    {analyticsView.sessionPerformance === "minimized" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            sessionPerformance: "maximized",
+                            setupQuality: prev.setupQuality === "maximized" ? "maximized" : prev.setupQuality,
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Maximize"
+                      >
+                        <Maximize2 size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            sessionPerformance: "minimized",
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Minimize"
+                      >
+                        <Minimize2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-5 h-56">
+                {analyticsView.sessionPerformance !== "minimized" && (
+                <div className="mt-5 h-96">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={sessionData}>
                       <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
@@ -1965,13 +2124,15 @@ function App() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+                )}
               </div>
 
-              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+              <div className={`rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft ${analyticsView.setupQuality === "maximized" ? "xl:col-span-1" : analyticsView.setupQuality === "minimized" ? "" : ""}`}>
                 <div className="flex items-center justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-sm text-slate-400">Risk vs Reward</p>
                     <h2 className="text-lg font-semibold">Setup Quality</h2>
+                    {analyticsView.setupQuality !== "minimized" && (
                     <div className="mt-2 min-w-[170px]">
                       <Dropdown
                         value={strategyScopes.setupQuality}
@@ -1993,12 +2154,47 @@ function App() {
                         className="!max-w-none !px-2 !py-1 text-xs"
                       />
                     </div>
+                    )}
                   </div>
-                  <p className="text-xs text-slate-500 shrink-0 text-right">
-                    Uses filters from Performance Metrics
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-slate-500 shrink-0 text-right">
+                      Uses filters from Performance Metrics
+                    </p>
+                    {analyticsView.setupQuality === "minimized" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            setupQuality: "maximized",
+                            sessionPerformance: prev.sessionPerformance === "maximized" ? "maximized" : prev.sessionPerformance,
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Maximize"
+                      >
+                        <Maximize2 size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsView((prev) => ({
+                            ...prev,
+                            setupQuality: "minimized",
+                          }));
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition text-slate-400 hover:text-white"
+                        title="Minimize"
+                      >
+                        <Minimize2 size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-5 h-56">
+                {analyticsView.setupQuality !== "minimized" && (
+                <>
+                <div className="mt-5 h-96">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={setupQualityTrades}>
                       <XAxis
@@ -2046,12 +2242,15 @@ function App() {
                     {topSetupsLabel}
                   </span>
                 </div>
+                </>
+                )}
               </div>
             </div>
 
                 <div className="w-full">
                   <CalendarPanel compact showExpand />
                 </div>
+              </div>
 
             <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
               <div className="flex flex-wrap items-center justify-between gap-4">
@@ -2235,6 +2434,95 @@ function App() {
                 </table>
               </div>
             </div>
+            </section>
+          ) : activeView === "settings" ? (
+            <section className="px-6 py-6">
+              <div className="grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-4 shadow-soft">
+                  <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-3">
+                    User
+                  </p>
+                  <nav className="space-y-1 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => setSettingsSection("themes")}
+                      className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left transition ${
+                        settingsSection === "themes"
+                          ? "bg-surface-800 text-white"
+                          : "text-slate-300 hover:bg-surface-800/70"
+                      }`}
+                    >
+                      <span>Themes</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSettingsSection("settings")}
+                      className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left transition ${
+                        settingsSection === "settings"
+                          ? "bg-surface-800 text-white"
+                          : "text-slate-300 hover:bg-surface-800/70"
+                      }`}
+                    >
+                      <span>Settings</span>
+                    </button>
+                  </nav>
+                </div>
+                <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                  {settingsSection === "themes" ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between gap-4 border-b border-surface-800 pb-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                            Appearance
+                          </p>
+                          <h2 className="text-lg font-semibold">
+                            Themes
+                          </h2>
+                          <p className="mt-1 text-sm text-slate-400">
+                            Choose a color theme for your trading journal.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="max-w-sm space-y-3">
+                        <label className="flex flex-col gap-2 text-sm">
+                          <span className="text-slate-200">Theme</span>
+                          <div className="min-w-[200px]">
+                            <Dropdown
+                              value={theme}
+                              onChange={(v) => setTheme(v)}
+                              options={themeOptions}
+                              placeholder="Select theme"
+                              className="!max-w-none !px-2 !py-1.5 text-sm"
+                            />
+                          </div>
+                          <span className="text-[11px] text-slate-500">
+                            Theme is saved to this browser and applied across the app.
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between gap-4 border-b border-surface-800 pb-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+                            Preferences
+                          </p>
+                          <h2 className="text-lg font-semibold">
+                            Settings
+                          </h2>
+                          <p className="mt-1 text-sm text-slate-400">
+                            Additional user preferences can be configured here in the future.
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-sm text-slate-400">
+                        Settings panel is a placeholder for now. Your data and layouts continue
+                        to work as before.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           ) : activeView === "new-account" ? (
