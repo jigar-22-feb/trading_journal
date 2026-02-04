@@ -175,6 +175,24 @@ export function createTrade(body: {
   });
 }
 
+export function getTrade(tradeId: string): Promise<TradeDetail> {
+  return api<TradeDetail>(`/trades/${tradeId}`);
+}
+
+/** Full trade as returned by GET /trades/:id (includes notes, images, etc.) */
+export interface TradeDetail extends ApiTrade {
+  notes?: string | null;
+  entry_reason?: string | null;
+  exit_reason?: string | null;
+  custom_fields?: Record<string, string> | null;
+  images?: { image_path: string; uploaded_at?: string }[];
+  tags?: string[];
+  sl_moved_to_breakeven?: boolean;
+  increased_lot_size?: boolean;
+  balance_before_trade?: number;
+  balance_after_trade?: number;
+}
+
 export function deleteTrade(tradeId: string): Promise<void> {
   return api(`/trades/${tradeId}`, { method: "DELETE" });
 }

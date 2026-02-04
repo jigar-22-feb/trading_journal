@@ -48,11 +48,14 @@ import {
   deleteAllTrades,
   deleteTrade,
   getNextTradeId as fetchNextTradeId,
+  getTrade,
   getTrades,
   normalizeTrade,
   uploadTradeImages,
   type Trade,
+  type TradeDetail,
 } from "./api/trades";
+import { API_BASE } from "./api/client";
 import { createAccount } from "./api/accounts";
 import { createStrategy } from "./api/strategies";
 import { getFilters } from "./api/analytics";
@@ -102,6 +105,15 @@ const btnGhost =
   "rounded-2xl border border-surface-700/60 bg-transparent px-4 py-2 text-sm text-white/80 ring-1 ring-white/5 transition duration-200 hover:border-accent-400/60 hover:bg-surface-800/40 hover:text-white active:translate-y-[1px] focus:outline-none focus:ring-2 focus:ring-accent-400/30 disabled:cursor-not-allowed disabled:opacity-60";
 
 type SelectOption = { value: string; label: string; disabled?: boolean };
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-xs font-medium text-slate-500">{label}</span>
+      <span className="text-slate-200">{value}</span>
+    </div>
+  );
+}
 
 type DropdownProps = {
   value: string;
@@ -314,6 +326,12 @@ function App() {
   );
   const [deleteAllConfirmStep, setDeleteAllConfirmStep] = useState<1 | 2 | null>(null);
   const [deletingAll, setDeletingAll] = useState(false);
+  const [selectedTradeIdForDetail, setSelectedTradeIdForDetail] = useState<string | null>(null);
+  const [selectedTradeDetail, setSelectedTradeDetail] = useState<TradeDetail | null>(null);
+  const [tradeDetailLoading, setTradeDetailLoading] = useState(false);
+  const [returnToViewAfterEntryDetails, setReturnToViewAfterEntryDetails] = useState<
+    "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings"
+  >("dashboard");
   const [filtersLoading, setFiltersLoading] = useState(true);
   const [accounts, setAccounts] = useState<
     { account_id: string; account_name: string }[]
@@ -385,7 +403,7 @@ function App() {
   });
   const [pendingDelete, setPendingDelete] = useState<{ type: "builtin" | "custom"; id: string; name: string } | null>(null);
   const [activeView, setActiveView] = useState<
-    "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings"
+    "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings" | "trade-entry-details"
   >("dashboard");
   const [settingsSection, setSettingsSection] = useState<"themes" | "settings">(
     "themes",
@@ -660,6 +678,16 @@ function App() {
       fetchCustomCharts();
     }
   }, [activeView]);
+
+  useEffect(() => {
+    if (!selectedTradeIdForDetail) return;
+    setSelectedTradeDetail(null);
+    setTradeDetailLoading(true);
+    getTrade(selectedTradeIdForDetail)
+      .then(setSelectedTradeDetail)
+      .catch(() => setSelectedTradeDetail(null))
+      .finally(() => setTradeDetailLoading(false));
+  }, [selectedTradeIdForDetail]);
 
   const [newChartName, setNewChartName] = useState("");
   const [newChartType, setNewChartType] = useState<ChartType>("bar");
@@ -1048,6 +1076,19 @@ function App() {
     }));
   };
 
+  const imagePreviewUrlsRef = useRef<string[]>([]);
+  const imagePreviewUrls = useMemo(() => {
+    return formState.images.map((file) => URL.createObjectURL(file));
+  }, [formState.images]);
+  useEffect(() => {
+    const prev = imagePreviewUrlsRef.current;
+    imagePreviewUrlsRef.current = imagePreviewUrls;
+    prev.forEach((url) => URL.revokeObjectURL(url));
+    return () => {
+      imagePreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [imagePreviewUrls]);
+
   const updateCustomField = (index: number, key: "key" | "value", value: string) => {
     setCustomFields((prev) =>
       prev.map((field, fieldIndex) =>
@@ -1426,6 +1467,8 @@ function App() {
     { value: "graphite-ivory", label: "Graphite Ivory" },
     { value: "royal-matrix", label: "Royal Matrix" },
     { value: "copper-ice", label: "Copper Ice" },
+    { value: "dark", label: "Dark" },
+    { value: "starry-night", label: "Starry night" },
   ];
 
   const filteredTrades = useMemo(() => {
@@ -2188,32 +2231,55 @@ function App() {
                 >
                   <ArrowLeft size={16} /> Back to Dashboard
                 </button>
+              ) : activeView === "trade-entry-details" ? (
+                <button
+                  onClick={() => {
+                    setActiveView(returnToViewAfterEntryDetails);
+                    setSelectedTradeIdForDetail(null);
+                    setSelectedTradeDetail(null);
+                  }}
+                  className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
+                >
+                  <ArrowLeft size={16} /> Back
+                </button>
               ) : (
                 <div className="w-6" aria-hidden="true" />
               )}
-              <h1 className="flex-1 text-center text-2xl font-semibold">
-                {activeView === "dashboard-settings"
-                  ? "Dashboard settings"
-                  : activeView === "dashboard-page"
-                    ? "Dashboard"
-                    : "Trading Journal"}
-              </h1>
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeView === "dashboard-page") setActiveView("dashboard-settings");
-                  else if (activeView === "dashboard-settings") setActiveView("dashboard-page");
-                  else setActiveView("settings");
-                }}
-                className="flex items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 p-2 text-slate-300 shadow-[0_10px_20px_rgba(0,0,0,0.25)] hover:bg-surface-800/80 transition"
-                title={activeView === "dashboard-page" || activeView === "dashboard-settings" ? "Dashboard settings" : "User"}
-              >
-                {activeView === "dashboard-page" || activeView === "dashboard-settings" ? (
-                  <Settings size={20} />
-                ) : (
-                  <User size={20} />
+              <div className="flex flex-1 flex-col items-center justify-center">
+                <h1 className="text-center text-2xl font-semibold">
+                  {activeView === "dashboard-settings"
+                    ? "Dashboard settings"
+                    : activeView === "dashboard-page"
+                      ? "Dashboard"
+                      : activeView === "trade-entry-details"
+                        ? "Entry details"
+                        : "Trading Journal"}
+                </h1>
+                {activeView === "trade-entry-details" && selectedTradeIdForDetail && (
+                  <p className="mt-0.5 text-center text-sm font-medium text-slate-400">
+                    {selectedTradeIdForDetail}
+                  </p>
                 )}
-              </button>
+              </div>
+              {activeView !== "trade-entry-details" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeView === "dashboard-page") setActiveView("dashboard-settings");
+                    else if (activeView === "dashboard-settings") setActiveView("dashboard-page");
+                    else setActiveView("settings");
+                  }}
+                  className="flex items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 p-2 text-slate-300 shadow-[0_10px_20px_rgba(0,0,0,0.25)] hover:bg-surface-800/80 transition"
+                  title={activeView === "dashboard-page" || activeView === "dashboard-settings" ? "Dashboard settings" : "User"}
+                >
+                  {activeView === "dashboard-page" || activeView === "dashboard-settings" ? (
+                    <Settings size={20} />
+                  ) : (
+                    <User size={20} />
+                  )}
+                </button>
+              )}
+              {activeView === "trade-entry-details" && <div className="w-10" aria-hidden="true" />}
             </div>
           </div>
           <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/70 bg-surface-900/40 px-6 py-4 backdrop-blur">
@@ -2224,7 +2290,7 @@ function App() {
               >
                 <Plus size={16} /> New Trade
               </button>
-            ) : activeView !== "dashboard-page" && activeView !== "dashboard-settings" ? (
+            ) : activeView !== "dashboard-page" && activeView !== "dashboard-settings" && activeView !== "trade-entry-details" ? (
               <button
                 onClick={() => setActiveView("dashboard")}
                 className="flex items-center gap-2 rounded-full border border-slate-500/80 bg-slate-900 px-3 py-1.5 text-sm font-medium text-slate-50 shadow-[0_10px_25px_rgba(0,0,0,0.35)] hover:bg-slate-800/90 hover:border-slate-300/80 transition"
@@ -2552,7 +2618,22 @@ function App() {
                     recentActivityTrades.map((trade) => (
                       <tr
                         key={trade.trade_id}
-                        className="border-t border-surface-800 text-slate-200 transition hover:bg-surface-800/60"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setReturnToViewAfterEntryDetails(activeView);
+                          setSelectedTradeIdForDetail(trade.trade_id);
+                          setActiveView("trade-entry-details");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setReturnToViewAfterEntryDetails(activeView);
+                            setSelectedTradeIdForDetail(trade.trade_id);
+                            setActiveView("trade-entry-details");
+                          }
+                        }}
+                        className="cursor-pointer border-t border-surface-800 text-slate-200 transition hover:bg-surface-800/60"
                       >
                         <td className="px-4 py-3">
                           <div className="font-semibold">{trade.trade_id}</div>
@@ -2584,7 +2665,7 @@ function App() {
                           {trade.pnl >= 0 ? "+" : ""}
                           {trade.pnl.toFixed(3)}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             onClick={() => setDeleteConfirmTradeId(trade.trade_id)}
@@ -3930,6 +4011,108 @@ function App() {
                 </form>
               </div>
             </section>
+          ) : activeView === "trade-entry-details" ? (
+            <section className="px-6 py-6">
+              <div className="mx-auto max-w-3xl rounded-2xl border border-surface-700 bg-surface-900/80 p-6 shadow-soft">
+                {tradeDetailLoading && (
+                  <p className="py-12 text-center text-slate-400">Loading trade details…</p>
+                )}
+                {!tradeDetailLoading && !selectedTradeDetail && selectedTradeIdForDetail && (
+                  <p className="py-12 text-center text-slate-400">Could not load trade.</p>
+                )}
+                {!tradeDetailLoading && selectedTradeDetail && (
+                  <div className="space-y-6 text-sm">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <DetailRow label="Trade ID" value={selectedTradeDetail.trade_id} />
+                      <DetailRow label="Asset" value={selectedTradeDetail.asset} />
+                      <DetailRow label="Direction" value={selectedTradeDetail.direction} />
+                      <DetailRow label="Timeframe" value={selectedTradeDetail.timeframe} />
+                      <DetailRow label="Session" value={selectedTradeDetail.session} />
+                      <DetailRow label="Trade type" value={selectedTradeDetail.trade_type} />
+                      <DetailRow label="Strategy" value={selectedTradeDetail.strategy?.strategy_name ?? selectedTradeDetail.strategy_name ?? "—"} />
+                      <DetailRow label="Account" value={selectedTradeDetail.account?.account_name ?? selectedTradeDetail.account_name ?? "—"} />
+                      <DetailRow label="Start" value={selectedTradeDetail.start_datetime} />
+                      <DetailRow label="End" value={selectedTradeDetail.end_datetime ?? "—"} />
+                      <DetailRow label="Entry price" value={selectedTradeDetail.entry_price != null ? String(selectedTradeDetail.entry_price) : "—"} />
+                      <DetailRow label="Exit price" value={selectedTradeDetail.exit_price != null ? String(selectedTradeDetail.exit_price) : "—"} />
+                      <DetailRow label="Risk %" value={selectedTradeDetail.risk_percentage != null ? String(selectedTradeDetail.risk_percentage) : "—"} />
+                      <DetailRow label="Expected R:R" value={selectedTradeDetail.expected_risk_reward != null ? String(selectedTradeDetail.expected_risk_reward) : "—"} />
+                      <DetailRow label="Actual R:R" value={selectedTradeDetail.actual_risk_reward != null ? String(selectedTradeDetail.actual_risk_reward) : "—"} />
+                      <DetailRow label="Take profit" value={selectedTradeDetail.take_profit != null ? String(selectedTradeDetail.take_profit) : "—"} />
+                      <DetailRow label="Stop loss" value={selectedTradeDetail.stop_loss != null ? String(selectedTradeDetail.stop_loss) : "—"} />
+                      <DetailRow label="Amount traded" value={selectedTradeDetail.amount_traded != null ? String(selectedTradeDetail.amount_traded) : "—"} />
+                      <DetailRow label="Lot size" value={selectedTradeDetail.lot_size != null ? String(selectedTradeDetail.lot_size) : "—"} />
+                      <DetailRow label="Leverage" value={selectedTradeDetail.leverage != null ? String(selectedTradeDetail.leverage) : "—"} />
+                      <DetailRow label="Trade fees" value={selectedTradeDetail.trade_fees != null ? String(selectedTradeDetail.trade_fees) : "—"} />
+                      <DetailRow label="PnL" value={selectedTradeDetail.pnl != null ? String(selectedTradeDetail.pnl) : "—"} />
+                      <DetailRow label="SL moved to breakeven" value={selectedTradeDetail.sl_moved_to_breakeven ? "Yes" : "No"} />
+                      <DetailRow label="Increased lot size" value={selectedTradeDetail.increased_lot_size ? "Yes" : "No"} />
+                      <DetailRow label="Balance before" value={selectedTradeDetail.balance_before_trade != null ? String(selectedTradeDetail.balance_before_trade) : "—"} />
+                      <DetailRow label="Balance after" value={selectedTradeDetail.balance_after_trade != null ? String(selectedTradeDetail.balance_after_trade) : "—"} />
+                    </div>
+                    {selectedTradeDetail.tags && selectedTradeDetail.tags.length > 0 && (
+                      <div>
+                        <p className="mb-1 font-medium text-slate-400">Tags</p>
+                        <p className="text-slate-200">{Array.isArray(selectedTradeDetail.tags) ? selectedTradeDetail.tags.join(", ") : "—"}</p>
+                      </div>
+                    )}
+                    {selectedTradeDetail.entry_reason && (
+                      <div>
+                        <p className="mb-1 font-medium text-slate-400">Entry reason</p>
+                        <p className="text-slate-200 whitespace-pre-wrap">{selectedTradeDetail.entry_reason}</p>
+                      </div>
+                    )}
+                    {selectedTradeDetail.exit_reason && (
+                      <div>
+                        <p className="mb-1 font-medium text-slate-400">Exit reason</p>
+                        <p className="text-slate-200 whitespace-pre-wrap">{selectedTradeDetail.exit_reason}</p>
+                      </div>
+                    )}
+                    {selectedTradeDetail.notes && (
+                      <div>
+                        <p className="mb-1 font-medium text-slate-400">Notes</p>
+                        <p className="text-slate-200 whitespace-pre-wrap">{selectedTradeDetail.notes}</p>
+                      </div>
+                    )}
+                    {selectedTradeDetail.custom_fields && Object.keys(selectedTradeDetail.custom_fields).length > 0 && (
+                      <div>
+                        <p className="mb-1 font-medium text-slate-400">Custom fields</p>
+                        <dl className="space-y-1 text-slate-200">
+                          {Object.entries(selectedTradeDetail.custom_fields).map(([k, v]) => (
+                            <div key={k} className="flex gap-2">
+                              <dt className="font-medium text-slate-400">{k}:</dt>
+                              <dd>{v}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+                    )}
+                    {selectedTradeDetail.images && selectedTradeDetail.images.length > 0 && (
+                      <div>
+                        <p className="mb-2 font-medium text-slate-400">Images</p>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedTradeDetail.images.map((img, i) => (
+                            <a
+                              key={i}
+                              href={`${API_BASE}${img.image_path}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block"
+                            >
+                              <img
+                                src={`${API_BASE}${img.image_path}`}
+                                alt=""
+                                className="h-24 w-24 rounded-lg border border-surface-600 object-cover"
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
           ) : (
             <section className="px-6 py-6">
               <div className="rounded-3xl border border-surface-700 bg-surface-900/80 p-6 shadow-soft">
@@ -4478,26 +4661,26 @@ function App() {
                   </div>
 
                   <div className="trade-form-grid grid gap-x-8 gap-y-10 md:grid-cols-2">
-                    <div className="flex items-center gap-4 pt-6 text-sm">
-                      <label className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-3 pt-6 text-sm">
+                      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-surface-600 bg-surface-800/60 px-4 py-3 shadow-sm ring-1 ring-white/5 transition hover:border-surface-500 hover:bg-surface-800 focus-within:ring-2 focus-within:ring-accent-400/40">
                         <input
                           name="sl_moved_to_breakeven"
                           type="checkbox"
                           checked={formState.sl_moved_to_breakeven}
                           onChange={handleFieldChange}
-                          className="h-4 w-4 rounded border-surface-700"
+                          className="h-4 w-4 rounded border-2 border-surface-500 bg-transparent accent-cyan-400 focus:ring-2 focus:ring-cyan-400/50 focus:ring-offset-0"
                         />
-                        SL moved to breakeven
+                        <span className="select-none font-medium text-slate-200">SL moved to breakeven</span>
                       </label>
-                      <label className="flex items-center gap-2">
+                      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-surface-600 bg-surface-800/60 px-4 py-3 shadow-sm ring-1 ring-white/5 transition hover:border-surface-500 hover:bg-surface-800 focus-within:ring-2 focus-within:ring-accent-400/40">
                         <input
                           name="increased_lot_size"
                           type="checkbox"
                           checked={formState.increased_lot_size}
                           onChange={handleFieldChange}
-                          className="h-4 w-4 rounded border-surface-700"
+                          className="h-4 w-4 rounded border-2 border-surface-500 bg-transparent accent-cyan-400 focus:ring-2 focus:ring-cyan-400/50 focus:ring-offset-0"
                         />
-                        Increased lot size
+                        <span className="select-none font-medium text-slate-200">Increased lot size</span>
                       </label>
                     </div>
                   </div>
@@ -4537,13 +4720,18 @@ function App() {
                         </span>
                       </div>
                       {formState.images.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-3">
                           {formState.images.map((file, index) => (
-                            <span
+                            <div
                               key={`${file.name}-${index}`}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-surface-600 bg-surface-800 px-2.5 py-1.5 text-xs text-slate-300"
+                              className="flex flex-col items-center gap-1.5 rounded-lg border border-surface-600 bg-surface-800 p-2"
                             >
-                              <span className="truncate max-w-[180px]" title={file.name}>
+                              <img
+                                src={imagePreviewUrls[index] ?? ""}
+                                alt={file.name}
+                                className="h-20 w-20 rounded object-cover bg-surface-700"
+                              />
+                              <span className="truncate max-w-[120px] text-xs text-slate-300" title={file.name}>
                                 {file.name}
                               </span>
                               <button
@@ -4555,7 +4743,7 @@ function App() {
                               >
                                 ×
                               </button>
-                            </span>
+                            </div>
                           ))}
                         </div>
                       )}
@@ -5090,6 +5278,7 @@ function App() {
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
