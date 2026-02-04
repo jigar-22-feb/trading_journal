@@ -8,6 +8,19 @@ Checkpoints mark a known-good state of the project for rollback.
 - **Created:** Baseline after full setup and visual verification
 - **Includes:** Dashboard, 100 seeded trades, charts (Equity Curve, Trade Outcomes, Trades by Session, Risk vs Reward), filters, New Trade form, backend (Express + Mongoose), frontend (React + Vite + Tailwind)
 
+## Checkpoint 2
+
+- **Tag:** `checkpoint-2`
+- **Created:** After implementing user icon, Settings page, and navigation improvements
+- **Includes:** 
+  - User icon in Trading Journal header (right side)
+  - Settings page with left sidebar navigation (Themes, Settings)
+  - Theme selector moved to Settings page
+  - "Home" button with back arrow for navigation (replaces "Back to Dashboard")
+  - Analytics cards default to maximized view with minimize/maximize toggle functionality
+  - "Today" date filter option added
+  - Enhanced chart tooltips showing profit information
+
 ## How to rollback to a checkpoint
 
 To restore the codebase to checkpoint 1:
