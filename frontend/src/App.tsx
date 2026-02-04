@@ -2350,9 +2350,6 @@ function App() {
                       Analytics
                     </p>
                     <h2 className="text-lg font-semibold">Dashboard</h2>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Charts are filtered by the controls below. Independent from Home performance metrics.
-                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="min-w-[170px]">
