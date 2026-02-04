@@ -42,6 +42,7 @@ import {
   User,
   Settings,
   LayoutDashboard,
+  RefreshCw,
 } from "lucide-react";
 import {
   createTrade,
@@ -405,12 +406,98 @@ function App() {
   const [activeView, setActiveView] = useState<
     "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings" | "trade-entry-details"
   >("dashboard");
-  const [settingsSection, setSettingsSection] = useState<"themes" | "settings">(
-    "themes",
-  );
+  const [settingsSection, setSettingsSection] = useState<
+    "themes" | "live-price" | "settings"
+  >("themes");
+  const [livePriceEnabled, setLivePriceEnabled] = useState(() => {
+    try {
+      const raw = localStorage.getItem("tj-live-price");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { btcusdt?: boolean; xauusd?: boolean };
+        return {
+          btcusdt: parsed.btcusdt !== false,
+          xauusd: parsed.xauusd !== false,
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return { btcusdt: true, xauusd: true };
+  });
+  const [livePriceRefreshSeconds, setLivePriceRefreshSeconds] = useState<10 | 20 | 30 | 60>(() => {
+    try {
+      const raw = localStorage.getItem("tj-live-price-refresh");
+      if (raw) {
+        const n = Number(raw);
+        if (n === 10 || n === 20 || n === 30 || n === 60) return n;
+      }
+    } catch {
+      // ignore
+    }
+    return 60;
+  });
+  const [livePriceRefreshTrigger, setLivePriceRefreshTrigger] = useState(0);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarPopup, setCalendarPopup] = useState<
+    null | { type: "day"; dateKey: string } | { type: "week"; weekDays: Date[] }
+  >(null);
   const [heroProgress, setHeroProgress] = useState(0);
+  const [livePrices, setLivePrices] = useState<{
+    btcUsdt: string | null;
+    xauUsd: string | null;
+    loading: boolean;
+    error: string | null;
+  }>({ btcUsdt: null, xauUsd: null, loading: true, error: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchPrices = async () => {
+      try {
+        const [btcRes, xauRes] = await Promise.all([
+          fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"),
+          fetch("https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT"),
+        ]);
+        if (cancelled) return;
+        const btcData = (await btcRes.json()) as { price?: string };
+        const xauData = (await xauRes.json()) as { price?: string };
+        const btc = btcData?.price != null ? Number(btcData.price) : null;
+        const xau = xauData?.price != null ? Number(xauData.price) : null;
+        setLivePrices({
+          btcUsdt: btc != null ? btc.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null,
+          xauUsd: xau != null ? xau.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null,
+          loading: false,
+          error: null,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setLivePrices((p) => ({ ...p, loading: false, error: "Failed to load prices" }));
+        }
+      }
+    };
+    fetchPrices();
+    const ms = livePriceRefreshSeconds * 1000;
+    const interval = setInterval(fetchPrices, ms);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [livePriceRefreshSeconds, livePriceRefreshTrigger]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("tj-live-price", JSON.stringify(livePriceEnabled));
+    } catch {
+      // ignore
+    }
+  }, [livePriceEnabled]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("tj-live-price-refresh", String(livePriceRefreshSeconds));
+    } catch {
+      // ignore
+    }
+  }, [livePriceRefreshSeconds]);
 
   useEffect(() => {
     if (!assetDropdownOpen) return;
@@ -1989,6 +2076,15 @@ function App() {
     });
     return { map, totalPnL, totalTrades };
   }, [trades, calendarMonthStart, accountScopes.calendar, strategyScopes.calendar]);
+  const calendarScopedTrades = useMemo(() => {
+    const byAccount =
+      accountScopes.calendar === "all"
+        ? trades
+        : trades.filter((t) => t.account_name === accountScopes.calendar);
+    return strategyScopes.calendar === "all"
+      ? byAccount
+      : byAccount.filter((t) => t.strategy === strategyScopes.calendar);
+  }, [trades, accountScopes.calendar, strategyScopes.calendar]);
   const calendarDays = useMemo(() => {
     const startDay = calendarMonthStart.getDay();
     const startOffset = (startDay + 6) % 7;
@@ -2007,6 +2103,18 @@ function App() {
     }
     return weeks;
   }, [calendarDays]);
+  const calendarPopupTrades = useMemo(() => {
+    if (!calendarPopup) return [];
+    if (calendarPopup.type === "day") {
+      return calendarScopedTrades.filter(
+        (t) => toDateKey(new Date(t.start_datetime_raw)) === calendarPopup.dateKey
+      );
+    }
+    const weekKeys = new Set(calendarPopup.weekDays.map((d) => toDateKey(d)));
+    return calendarScopedTrades.filter((t) =>
+      weekKeys.has(toDateKey(new Date(t.start_datetime_raw)))
+    );
+  }, [calendarPopup, calendarScopedTrades]);
   const formatCompact = (value: number, decimals = 3) => {
     const abs = Math.abs(value);
     if (abs >= 1000) {
@@ -2017,30 +2125,11 @@ function App() {
   const formatNumber = (value: number) => value.toFixed(3);
   const formatInteger = (value: number) => String(Math.round(Number(value)));
 
-  const CalendarPanel = ({
-    compact = false,
-    showExpand = false,
-  }: {
-    compact?: boolean;
-    showExpand?: boolean;
-  }) => (
+  const CalendarPanel = ({ compact = false }: { compact?: boolean }) => (
     <div
       className={`rounded-3xl border border-surface-800 bg-surface-900/85 shadow-soft ${
-        compact ? "cursor-pointer p-5" : "p-6"
+        compact ? "p-5" : "p-6"
       }`}
-      onClick={showExpand ? () => setCalendarOpen(true) : undefined}
-      role={showExpand ? "button" : undefined}
-      tabIndex={showExpand ? 0 : undefined}
-      onKeyDown={
-        showExpand
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setCalendarOpen(true);
-              }
-            }
-          : undefined
-      }
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -2097,18 +2186,6 @@ function App() {
             Trades:{" "}
             <span className="font-semibold text-white">{calendarStats.totalTrades}</span>
           </span>
-          {showExpand && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setCalendarOpen(true);
-              }}
-              className="rounded-2xl border border-surface-700 bg-surface-800/80 px-3 py-1 text-xs text-slate-200 transition hover:border-accent-400/70 hover:text-white"
-            >
-              Expand
-            </button>
-          )}
         </div>
       </div>
       <div className="mt-4 space-y-2">
@@ -2146,7 +2223,19 @@ function App() {
                   return (
                     <div
                       key={key}
-                      className={`min-h-[90px] rounded-2xl border px-3 py-2 text-xs ${
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCalendarPopup({ type: "day", dateKey: key });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setCalendarPopup({ type: "day", dateKey: key });
+                        }
+                      }}
+                      className={`min-h-[90px] cursor-pointer rounded-2xl border px-3 py-2 text-xs transition hover:border-accent-400/50 ${
                         inMonth
                           ? "border-surface-700 bg-surface-900/70 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]"
                           : "border-surface-800 bg-surface-900/30 text-slate-500"
@@ -2171,7 +2260,21 @@ function App() {
                     </div>
                   );
                 })}
-                <div className="min-h-[90px] rounded-2xl border border-surface-700 bg-surface-900/80 px-3 py-2 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCalendarPopup({ type: "week", weekDays: week });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setCalendarPopup({ type: "week", weekDays: week });
+                    }
+                  }}
+                  className="min-h-[90px] cursor-pointer rounded-2xl border border-surface-700 bg-surface-900/80 px-3 py-2 text-xs text-slate-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition hover:border-accent-400/50"
+                >
                   <div className="text-[11px] uppercase text-slate-500">Weekly</div>
                   <div className="mt-2 flex flex-1 flex-col items-center justify-center text-center">
                     <div className="text-sm font-semibold text-white">
@@ -2199,6 +2302,49 @@ function App() {
     <div className="min-h-screen text-slate-100">
       <div className="flex">
         <main className="flex-1">
+          {/* Live prices bar above hero image (only when at least one is enabled) */}
+          {(livePriceEnabled.btcusdt || livePriceEnabled.xauusd) && (
+            <div className="flex flex-wrap items-center justify-center gap-2 border-b border-slate-800/70 bg-surface-950/95 px-4 py-2.5 backdrop-blur sm:gap-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setLivePrices((p) => ({ ...p, loading: true }));
+                  setLivePriceRefreshTrigger((n) => n + 1);
+                }}
+                className="rounded p-1 text-slate-400 transition hover:bg-surface-800/80 hover:text-slate-200"
+                title="Refresh prices"
+              >
+                <RefreshCw size={14} className={livePrices.loading ? "animate-spin" : ""} />
+              </button>
+              {livePriceEnabled.btcusdt && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-semibold text-slate-400">BTC/USDT</span>
+                  {livePrices.loading ? (
+                    <span className="text-slate-500">…</span>
+                  ) : livePrices.btcUsdt != null ? (
+                    <span className="font-mono font-medium text-emerald-400">${livePrices.btcUsdt}</span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </div>
+              )}
+              {livePriceEnabled.xauusd && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-semibold text-slate-400">XAU/USD</span>
+                  {livePrices.loading ? (
+                    <span className="text-slate-500">…</span>
+                  ) : livePrices.xauUsd != null ? (
+                    <span className="font-mono font-medium text-amber-400">${livePrices.xauUsd}</span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </div>
+              )}
+              {livePrices.error && (
+                <span className="text-xs text-rose-400/90">{livePrices.error}</span>
+              )}
+            </div>
+          )}
           <div
             className="relative overflow-hidden border-b border-slate-800/70"
             style={{
@@ -2495,7 +2641,7 @@ function App() {
                 </div>
 
                 <div className="w-full">
-                  <CalendarPanel compact showExpand />
+                  <CalendarPanel compact />
                 </div>
               </div>
 
@@ -2705,6 +2851,17 @@ function App() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setSettingsSection("live-price")}
+                      className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left transition ${
+                        settingsSection === "live-price"
+                          ? "bg-surface-800 text-white"
+                          : "text-slate-300 hover:bg-surface-800/70"
+                      }`}
+                    >
+                      <span>Live Price</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setSettingsSection("settings")}
                       className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left transition ${
                         settingsSection === "settings"
@@ -2750,26 +2907,52 @@ function App() {
                         </label>
                       </div>
                     </div>
-                  ) : (
+                  ) : settingsSection === "live-price" ? (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between gap-4 border-b border-surface-800 pb-4">
-                        <div>
-                          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                            Preferences
-                          </p>
-                          <h2 className="text-lg font-semibold">
-                            Settings
-                          </h2>
-                          <p className="mt-1 text-sm text-slate-400">
-                            Additional user preferences can be configured here in the future.
-                          </p>
-                        </div>
+                      <div className="space-y-3">
+                        <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-surface-700 bg-surface-800/60 px-4 py-3 transition hover:bg-surface-800/80">
+                          <input
+                            type="checkbox"
+                            checked={livePriceEnabled.btcusdt}
+                            onChange={(e) =>
+                              setLivePriceEnabled((p) => ({ ...p, btcusdt: e.target.checked }))
+                            }
+                            className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-400 focus:ring-accent-500"
+                          />
+                          <span className="text-slate-200">BTCUSDT</span>
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-surface-700 bg-surface-800/60 px-4 py-3 transition hover:bg-surface-800/80">
+                          <input
+                            type="checkbox"
+                            checked={livePriceEnabled.xauusd}
+                            onChange={(e) =>
+                              setLivePriceEnabled((p) => ({ ...p, xauusd: e.target.checked }))
+                            }
+                            className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-400 focus:ring-accent-500"
+                          />
+                          <span className="text-slate-200">XAUUSD</span>
+                        </label>
+                        <label className="flex flex-col gap-2 text-sm">
+                          <span className="text-slate-200">Price refresh</span>
+                          <div className="min-w-[140px]">
+                            <Dropdown
+                              value={String(livePriceRefreshSeconds)}
+                              onChange={(v) => setLivePriceRefreshSeconds(Number(v) as 10 | 20 | 30 | 60)}
+                              options={[
+                                { value: "10", label: "10 seconds" },
+                                { value: "20", label: "20 seconds" },
+                                { value: "30", label: "30 seconds" },
+                                { value: "60", label: "60 seconds" },
+                              ]}
+                              placeholder="Refresh interval"
+                              className="!max-w-none !px-2 !py-1.5 text-sm"
+                            />
+                          </div>
+                        </label>
                       </div>
-                      <p className="text-sm text-slate-400">
-                        Settings panel is a placeholder for now. Your data and layouts continue
-                        to work as before.
-                      </p>
                     </div>
+                  ) : (
+                    <div />
                   )}
                 </div>
               </div>
@@ -5178,6 +5361,78 @@ function App() {
               </div>
               <div className="mt-5">
                 <CalendarPanel />
+              </div>
+            </div>
+          </div>
+        )}
+        {calendarPopup && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-surface-950/80 p-4 backdrop-blur"
+            onClick={() => setCalendarPopup(null)}
+          >
+            <div
+              className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-surface-700 bg-surface-900 shadow-soft"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-surface-700 px-6 py-4">
+                <h3 className="text-lg font-semibold text-white">
+                  {calendarPopup.type === "day"
+                    ? `Trades on ${calendarPopup.dateKey}`
+                    : `Trades for week (${toDateKey(calendarPopup.weekDays[0])} – ${toDateKey(calendarPopup.weekDays[6])})`}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setCalendarPopup(null)}
+                  className="rounded-xl p-2 text-slate-400 transition hover:bg-surface-800 hover:text-white"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="overflow-y-auto px-6 py-4">
+                {calendarPopupTrades.length === 0 ? (
+                  <p className="py-6 text-center text-slate-500">No trades in this period.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {calendarPopupTrades.map((trade) => (
+                      <div
+                        key={trade.trade_id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setReturnToViewAfterEntryDetails(activeView === "trade-entry-details" ? "dashboard" : activeView);
+                          setSelectedTradeIdForDetail(trade.trade_id);
+                          setActiveView("trade-entry-details");
+                          setCalendarPopup(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setReturnToViewAfterEntryDetails(activeView === "trade-entry-details" ? "dashboard" : activeView);
+                            setSelectedTradeIdForDetail(trade.trade_id);
+                            setActiveView("trade-entry-details");
+                            setCalendarPopup(null);
+                          }
+                        }}
+                        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-xl border border-surface-700 bg-surface-800/60 px-4 py-3 text-sm transition hover:bg-surface-700/80"
+                      >
+                        <div className="font-semibold text-white">{trade.trade_id}</div>
+                        <div className="text-slate-400">{trade.start_datetime}</div>
+                        <div className="w-full text-slate-300 sm:w-auto">
+                          {trade.asset} · {trade.strategy}
+                        </div>
+                        <div
+                          className={`font-semibold ${
+                            trade.pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                          }`}
+                        >
+                          {trade.pnl >= 0 ? "+" : ""}
+                          {trade.pnl.toFixed(3)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
