@@ -50,6 +50,8 @@ app.use(
 );
 app.use("/accounts", require("./routes/accounts")());
 app.use("/analytics", require("./routes/analytics")());
+app.use("/dashboard-charts", require("./routes/dashboardCharts")());
+app.use("/tags", require("./routes/tags")());
 app.use("/", require("./routes/importExport")(importUpload));
 
 app.use((err, _, res, __) => {

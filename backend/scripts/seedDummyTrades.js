@@ -12,6 +12,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const Trade = require("../src/models/Trade");
 const Account = require("../src/models/Account");
 const Strategy = require("../src/models/Strategy");
+const { syncTagsForTrade } = require("../src/utils/tagHelpers");
 
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/trading_journal";
@@ -182,7 +183,7 @@ function buildDummyTrade(index, accounts, strategies, startTradeNum) {
   }
   const uniqueTags = [...new Set(tags)];
 
-  return {
+  const tradeDoc = {
     trade_id: `trd-${startTradeNum + index}`,
     start_datetime: start,
     end_datetime: end,
@@ -216,8 +217,8 @@ function buildDummyTrade(index, accounts, strategies, startTradeNum) {
     exit_reason: pnl >= 0 ? "Target" : "Stop",
     notes: `Dummy trade ${index + 1}`,
     custom_fields,
-    tags: uniqueTags,
   };
+  return { tradeDoc, tagNames: uniqueTags };
 }
 
 async function run() {
@@ -230,15 +231,21 @@ async function run() {
 
   const startNum = await getNextTradeNumber();
   const count = 100; // Always generate exactly 100 trades
-  const trades = [];
+  const tradeDocs = [];
+  const tagNamesList = [];
   for (let i = 0; i < count; i++) {
-    trades.push(buildDummyTrade(i, accounts, strategies, startNum));
+    const { tradeDoc, tagNames } = buildDummyTrade(i, accounts, strategies, startNum);
+    tradeDocs.push(tradeDoc);
+    tagNamesList.push(tagNames);
   }
 
-  await Trade.insertMany(trades);
-  console.log(`Inserted ${trades.length} dummy trades (trd-${startNum} to trd-${startNum + count - 1}) over last 6 months.`);
-  console.log(`Strategies used: ${strategies.map(s => s.strategy_name).join(", ")}`);
-  console.log(`Accounts used: ${accounts.map(a => a.account_name).join(", ")}`);
+  await Trade.insertMany(tradeDocs);
+  for (let i = 0; i < tradeDocs.length; i++) {
+    await syncTagsForTrade(tradeDocs[i].trade_id, tagNamesList[i]);
+  }
+  console.log(`Inserted ${tradeDocs.length} dummy trades (trd-${startNum} to trd-${startNum + count - 1}) over last 6 months.`);
+  console.log(`Strategies used: ${strategies.map((s) => s.strategy_name).join(", ")}`);
+  console.log(`Accounts used: ${accounts.map((a) => a.account_name).join(", ")}`);
   console.log("Trade Features order in DB:", TRADE_FEATURE_ORDER.join(" → "));
   await mongoose.disconnect();
   process.exit(0);

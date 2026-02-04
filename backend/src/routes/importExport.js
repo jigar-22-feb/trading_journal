@@ -9,6 +9,7 @@ const {
   toNumberOrNull,
 } = require("../utils/tradeHelpers");
 const Trade = require("../models/Trade");
+const { getTagNamesByTradeId, syncTagsForTrade } = require("../utils/tagHelpers");
 
 const parseTags = (value) => {
   if (!value) {
@@ -98,7 +99,11 @@ module.exports = (upload) => {
   router.get("/export/trades", async (req, res) => {
     const format = (req.query.format || "json").toLowerCase();
     const trades = await Trade.find().sort({ start_datetime: -1 });
-    const payload = trades.map(exportTrade);
+    const tradeIds = trades.map((t) => t.trade_id);
+    const tagsByTradeId = await getTagNamesByTradeId(tradeIds);
+    const payload = trades.map((t) =>
+      exportTrade({ ...t.toObject(), tags: tagsByTradeId.get(t.trade_id) || [] })
+    );
 
     if (format === "csv") {
       const parser = new Parser();
@@ -167,14 +172,15 @@ module.exports = (upload) => {
         }
 
         const data = buildTradeData(normalized);
+        const tradeId = normalized.trade_id || `trd-${Date.now()}`;
         const trade = await Trade.create({
           ...data,
-          trade_id: normalized.trade_id || `TRD-${Date.now()}`,
+          trade_id: tradeId,
           strategy_id: normalized.strategy_id || undefined,
           account_id: normalized.account_id || undefined,
-          tags: parseTags(normalized.tags),
         });
 
+        await syncTagsForTrade(trade.trade_id, parseTags(normalized.tags));
         results.push(trade.trade_id);
       }
 

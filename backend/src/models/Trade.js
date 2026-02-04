@@ -44,7 +44,6 @@ const TradeSchema = new mongoose.Schema(
     exit_reason: { type: String },
     notes: { type: String },
     custom_fields: { type: mongoose.Schema.Types.Mixed },
-    tags: [{ type: String }],
     images: [TradeImageSchema],
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

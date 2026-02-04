@@ -2,6 +2,7 @@ const router = require("express").Router();
 const Trade = require("../models/Trade");
 const Strategy = require("../models/Strategy");
 const Account = require("../models/Account");
+const { getAllTagNames } = require("../utils/tagHelpers");
 
 const buildPnLSeries = (trades) => {
   let equity = 10000;
@@ -65,7 +66,7 @@ module.exports = () => {
       Trade.distinct("session"),
       Strategy.find({}, { _id: 1, strategy_name: 1 }),
       Account.find({}, { _id: 1, account_name: 1 }),
-      Trade.distinct("tags"),
+      getAllTagNames(),
       Trade.distinct("account_name"),
       Trade.distinct("strategy_name"),
     ]);

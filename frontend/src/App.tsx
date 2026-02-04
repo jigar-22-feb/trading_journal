@@ -6,14 +6,24 @@ import {
   Bar,
   BarChart,
   Cell,
+  ComposedChart,
   Line,
   LineChart,
   Pie,
   PieChart,
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
+  Treemap,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
 import {
   Activity,
@@ -46,6 +56,15 @@ import {
 import { createAccount } from "./api/accounts";
 import { createStrategy } from "./api/strategies";
 import { getFilters } from "./api/analytics";
+import {
+  getDashboardCharts,
+  createDashboardChart,
+  updateDashboardChart,
+  deleteDashboardChart,
+  type DashboardChart as ApiDashboardChart,
+  type ChartType,
+} from "./api/dashboardCharts";
+import { getTags, createTag, deleteTag, type Tag as ApiTag } from "./api/tags";
 
   const dateRangeOptions: { value: string; label: string }[] = [
     { value: "Today", label: "Today" },
@@ -117,6 +136,10 @@ function Dropdown({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  useEffect(() => {
+    setOpen(false);
+  }, [value]);
+
   return (
     <div ref={ref} className={`relative ${disabled ? "opacity-60" : ""}`}>
       <button
@@ -131,7 +154,7 @@ function Dropdown({
         <ChevronDown className="h-4 w-4 text-slate-400" />
       </button>
       {open && !disabled && (
-        <div className="absolute z-30 mt-1 w-full rounded-2xl border border-surface-700 bg-white py-1 text-sm text-slate-900 shadow-soft">
+        <div className="absolute z-30 mt-1 min-w-0 w-full max-h-[var(--dropdown-max-h,14rem)] overflow-y-auto rounded-2xl border border-surface-700 bg-white py-1 text-sm text-slate-900 shadow-soft">
           {options.map((opt) => (
             <button
               key={opt.value}
@@ -140,10 +163,12 @@ function Dropdown({
               className={`flex w-full items-center px-3 py-1.5 text-left hover:bg-slate-100 ${
                 opt.disabled ? "cursor-not-allowed text-slate-400" : ""
               }`}
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 if (opt.disabled) return;
-                onChange(opt.value);
                 setOpen(false);
+                onChange(opt.value);
               }}
             >
               {opt.label}
@@ -268,6 +293,17 @@ function App() {
     }
   });
   const [newTag, setNewTag] = useState("");
+  const [manageTagsOpen, setManageTagsOpen] = useState(false);
+  const [manageTagsMode, setManageTagsMode] = useState<"add" | "delete" | null>(null);
+  const [manageTagName, setManageTagName] = useState("");
+  const [allTagsList, setAllTagsList] = useState<ApiTag[]>([]);
+  const [tagToDelete, setTagToDelete] = useState<ApiTag | null>(null);
+  const [deleteTagConfirmStep, setDeleteTagConfirmStep] = useState<1 | 2 | null>(null);
+  const [manageTagsLoading, setManageTagsLoading] = useState(false);
+  const [manageTagsError, setManageTagsError] = useState<string | null>(null);
+  const [availableTagsFromApi, setAvailableTagsFromApi] = useState<ApiTag[]>([]);
+  const [availableTagsLoading, setAvailableTagsLoading] = useState(false);
+  const [availableTagsSearch, setAvailableTagsSearch] = useState("");
   const [trades, setTrades] = useState<Trade[]>([]);
   const [tradesLoading, setTradesLoading] = useState(true);
   const [tradesError, setTradesError] = useState<string | null>(null);
@@ -335,6 +371,19 @@ function App() {
     }
     return defaultVis;
   });
+  const [deletedBuiltInCharts, setDeletedBuiltInCharts] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem("tj-deleted-builtin-charts");
+      if (stored) {
+        const parsed = JSON.parse(stored) as string[];
+        return new Set(parsed);
+      }
+    } catch {
+      // ignore
+    }
+    return new Set();
+  });
+  const [pendingDelete, setPendingDelete] = useState<{ type: "builtin" | "custom"; id: string; name: string } | null>(null);
   const [activeView, setActiveView] = useState<
     "dashboard" | "dashboard-page" | "dashboard-settings" | "new-trade" | "new-account" | "new-strategy" | "settings"
   >("dashboard");
@@ -511,6 +560,21 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAvailableTagsLoading(true);
+    getTags()
+      .then((list) => {
+        if (!cancelled) setAvailableTagsFromApi(list);
+      })
+      .finally(() => {
+        if (!cancelled) setAvailableTagsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const refreshFilters = async () => {
     setFiltersLoading(true);
     try {
@@ -565,6 +629,85 @@ function App() {
       // ignore
     }
   }, [dashboardChartVisibility]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "tj-deleted-builtin-charts",
+        JSON.stringify([...deletedBuiltInCharts])
+      );
+    } catch {
+      // ignore
+    }
+  }, [deletedBuiltInCharts]);
+
+  const [customCharts, setCustomCharts] = useState<ApiDashboardChart[]>([]);
+  const [customChartsLoading, setCustomChartsLoading] = useState(false);
+  const [customChartsError, setCustomChartsError] = useState<string | null>(null);
+  const fetchCustomCharts = async () => {
+    setCustomChartsLoading(true);
+    setCustomChartsError(null);
+    try {
+      const list = await getDashboardCharts();
+      setCustomCharts(list);
+    } catch (e) {
+      setCustomChartsError(e instanceof Error ? e.message : "Failed to load charts");
+    } finally {
+      setCustomChartsLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (activeView === "dashboard-page" || activeView === "dashboard-settings") {
+      fetchCustomCharts();
+    }
+  }, [activeView]);
+
+  const [newChartName, setNewChartName] = useState("");
+  const [newChartType, setNewChartType] = useState<ChartType>("bar");
+  const [newChartFeatures, setNewChartFeatures] = useState<string[]>([]);
+  const [createChartSubmitting, setCreateChartSubmitting] = useState(false);
+  const [createChartError, setCreateChartError] = useState<string | null>(null);
+  const dashboardChartFeatureOptions = [
+    { value: "session", label: "Session" },
+    { value: "strategy", label: "Strategy" },
+    { value: "asset", label: "Asset" },
+    { value: "date", label: "Date" },
+    { value: "pnl", label: "PnL" },
+    { value: "count", label: "Count" },
+    { value: "outcome", label: "Outcome (Win/Loss)" },
+    { value: "actual_risk_reward", label: "Actual R:R" },
+  ];
+  const toggleNewChartFeature = (value: string) => {
+    setNewChartFeatures((prev) =>
+      prev.includes(value) ? prev.filter((f) => f !== value) : [...prev, value]
+    );
+  };
+  const handleCreateChart = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = newChartName.trim();
+    if (!name) {
+      setCreateChartError("Chart name is required.");
+      return;
+    }
+    setCreateChartSubmitting(true);
+    setCreateChartError(null);
+    try {
+      await createDashboardChart({
+        name,
+        chart_type: newChartType,
+        features: newChartFeatures,
+        visible: true,
+        order: customCharts.length,
+      });
+      setNewChartName("");
+      setNewChartFeatures([]);
+      await fetchCustomCharts();
+    } catch (err) {
+      setCreateChartError(err instanceof Error ? err.message : "Failed to create chart");
+    } finally {
+      setCreateChartSubmitting(false);
+    }
+  };
+
   const getNextTradeIdFromList = (items: Trade[]) => {
     const maxId = items.reduce((max, trade) => {
       const match = trade.trade_id.match(/trd-(\d+)/i);
@@ -792,6 +935,59 @@ function App() {
     setNewTag("");
   };
 
+  const openManageTags = (mode: "add" | "delete") => {
+    setManageTagsError(null);
+    setManageTagsMode(mode);
+    setManageTagsOpen(true);
+    setManageTagName("");
+    setTagToDelete(null);
+    setDeleteTagConfirmStep(null);
+    if (mode === "delete") {
+      setManageTagsLoading(true);
+      getTags()
+        .then((list) => setAllTagsList(list))
+        .catch(() => setManageTagsError("Failed to load tags"))
+        .finally(() => setManageTagsLoading(false));
+    }
+  };
+
+  const handleManageTagCreate = async () => {
+    const name = normalizeTag(manageTagName);
+    if (!name) return;
+    setManageTagsError(null);
+    setManageTagsLoading(true);
+    try {
+      const created = await createTag(name);
+      setAvailableTagsFromApi((prev) => [...prev, created]);
+      ensureTagInPool(name);
+      await refreshFilters();
+      setManageTagName("");
+    } catch (e) {
+      setManageTagsError(e instanceof Error ? e.message : "Failed to add tag");
+    } finally {
+      setManageTagsLoading(false);
+    }
+  };
+
+  const handleManageTagDeleteConfirm = () => {
+    if (!tagToDelete) return;
+    setManageTagsLoading(true);
+    setManageTagsError(null);
+    deleteTag(tagToDelete._id)
+      .then(async () => {
+        setTagPool((prev) => prev.filter((t) => t.name !== tagToDelete.tag_name));
+        setAvailableTagsFromApi((prev) => prev.filter((t) => t._id !== tagToDelete._id));
+        await refreshFilters();
+        setTagToDelete(null);
+        setDeleteTagConfirmStep(null);
+        setAllTagsList((prev) => prev.filter((t) => t._id !== tagToDelete._id));
+      })
+      .catch((e) =>
+        setManageTagsError(e instanceof Error ? e.message : "Failed to delete tag")
+      )
+      .finally(() => setManageTagsLoading(false));
+  };
+
   const handleFieldChange = (
     event:
       | ChangeEvent<HTMLInputElement>
@@ -819,7 +1015,37 @@ function App() {
 
   const handleImagesChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
-    setFormState((prev) => ({ ...prev, images: files }));
+    setFormState((prev) => ({ ...prev, images: [...prev.images, ...files] }));
+    event.target.value = "";
+  };
+
+  const handleImagesPaste = (event: React.ClipboardEvent) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    const base = Date.now();
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf("image") !== -1) {
+        const file = item.getAsFile();
+        if (file) {
+          const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : ".png";
+          const uniqueName = `pasted-${base}-${i}${ext}`;
+          files.push(new File([file], uniqueName, { type: file.type }));
+        }
+      }
+    }
+    if (files.length > 0) {
+      event.preventDefault();
+      setFormState((prev) => ({ ...prev, images: [...prev.images, ...files] }));
+    }
+  };
+
+  const removeImageAt = (index: number) => {
+    setFormState((prev) => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index),
+    }));
   };
 
   const updateCustomField = (index: number, key: "key" | "value", value: string) => {
@@ -1605,6 +1831,76 @@ function App() {
       .map(([name]) => name)
       .join(" · ");
   }, [setupQualityTradesDashboard]);
+
+  const getGroupKey = (trade: Trade, feature: string): string => {
+    switch (feature) {
+      case "session": return trade.session || "—";
+      case "strategy": return trade.strategy || "—";
+      case "asset": return trade.asset || "—";
+      case "date": return trade.start_datetime.split(" ")[0] || "—";
+      case "outcome": return trade.pnl > 0 ? "Win" : "Loss";
+      default: return "—";
+    }
+  };
+  const getValue = (trade: Trade, feature: string): number => {
+    switch (feature) {
+      case "pnl": return trade.pnl ?? 0;
+      case "count": return 1;
+      case "actual_risk_reward": return trade.actual_risk_reward ?? 0;
+      default: return trade.pnl ?? 0;
+    }
+  };
+
+  const customChartDataList = useMemo(() => {
+    const list: { chart: ApiDashboardChart; data: { name: string; value?: number; time?: number; equity?: number }[] }[] = [];
+    const trades = outcomeTradesDashboard;
+    const visibleCustom = customCharts.filter((c) => c.visible);
+    for (const chart of visibleCustom) {
+      const [groupBy, valueField] = chart.features.length >= 2
+        ? [chart.features[0], chart.features[1]]
+        : chart.features.length === 1
+          ? [chart.features[0], "count"]
+          : ["session", "count"];
+      if (chart.chart_type === "line" || chart.chart_type === "area") {
+        if (groupBy === "date") {
+          const byDate = new Map<string, number>();
+          trades.forEach((t) => {
+            const key = getGroupKey(t, groupBy);
+            const val = getValue(t, valueField);
+            byDate.set(key, (byDate.get(key) ?? 0) + val);
+          });
+          const sorted = [...byDate.entries()].sort(
+            (a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime()
+          );
+          let running = 0;
+          const data = sorted.map(([name, val]) => {
+            running += val;
+            return { name, time: new Date(name).getTime(), value: val, equity: running };
+          });
+          list.push({ chart, data });
+        } else {
+          const byGroup = new Map<string, number>();
+          trades.forEach((t) => {
+            const key = getGroupKey(t, groupBy);
+            const val = getValue(t, valueField);
+            byGroup.set(key, (byGroup.get(key) ?? 0) + val);
+          });
+          const data = [...byGroup.entries()].map(([name, value]) => ({ name, value }));
+          list.push({ chart, data });
+        }
+      } else {
+        const byGroup = new Map<string, number>();
+        trades.forEach((t) => {
+          const key = getGroupKey(t, groupBy);
+          const val = getValue(t, valueField);
+          byGroup.set(key, (byGroup.get(key) ?? 0) + val);
+        });
+        const data = [...byGroup.entries()].map(([name, value]) => ({ name, value }));
+        list.push({ chart, data });
+      }
+    }
+    return list;
+  }, [customCharts, outcomeTradesDashboard]);
 
   const calendarMonthStart = useMemo(
     () => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1),
@@ -2465,7 +2761,7 @@ function App() {
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
-                {dashboardChartVisibility.equityCurve && (
+                {dashboardChartVisibility.equityCurve && !deletedBuiltInCharts.has("equityCurve") && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">PnL Over Time</p>
                   <h2 className="text-lg font-semibold">Equity Curve</h2>
@@ -2513,7 +2809,7 @@ function App() {
                 </div>
                 )}
 
-                {dashboardChartVisibility.tradeOutcomes && (
+                {dashboardChartVisibility.tradeOutcomes && !deletedBuiltInCharts.has("tradeOutcomes") && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Win/Loss Breakdown</p>
                   <h2 className="text-lg font-semibold">Trade Outcomes</h2>
@@ -2598,7 +2894,7 @@ function App() {
               </div>
 
               <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-                {dashboardChartVisibility.sessionPerformance && (
+                {dashboardChartVisibility.sessionPerformance && !deletedBuiltInCharts.has("sessionPerformance") && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Session Performance</p>
                   <h2 className="text-lg font-semibold">Trades by Session</h2>
@@ -2626,7 +2922,7 @@ function App() {
                 </div>
                 )}
 
-                {dashboardChartVisibility.setupQuality && (
+                {dashboardChartVisibility.setupQuality && !deletedBuiltInCharts.has("setupQuality") && (
                 <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                   <p className="text-sm text-slate-400">Risk vs Reward</p>
                   <h2 className="text-lg font-semibold">Setup Quality</h2>
@@ -2681,43 +2977,518 @@ function App() {
                 </div>
                 )}
               </div>
+
+              {customChartDataList.length > 0 && (
+                <div className="grid gap-6 xl:grid-cols-2">
+                  {customChartDataList.map(({ chart, data }) => (
+                    <div
+                      key={chart._id}
+                      className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft"
+                    >
+                      <h2 className="text-lg font-semibold text-white">{chart.name}</h2>
+                      <div className="mt-5 h-80">
+                        <ResponsiveContainer width="100%" height="100%">
+                          {chart.chart_type === "line" && (
+                            <LineChart data={data}>
+                              <XAxis
+                                dataKey={data[0]?.time != null ? "time" : "name"}
+                                type={data[0]?.time != null ? "number" : "category"}
+                                tick={{ fill: "#94A3B8", fontSize: 11 }}
+                                tickFormatter={
+                                  data[0]?.time != null
+                                    ? (v: number) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                    : undefined
+                                }
+                              />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Line type="monotone" dataKey="value" stroke="#6366F1" strokeWidth={2} dot={false} />
+                            </LineChart>
+                          )}
+                          {chart.chart_type === "area" && (
+                            <AreaChart data={data}>
+                              <XAxis
+                                dataKey={data[0]?.time != null ? "time" : "name"}
+                                type={data[0]?.time != null ? "number" : "category"}
+                                tick={{ fill: "#94A3B8", fontSize: 11 }}
+                                tickFormatter={
+                                  data[0]?.time != null
+                                    ? (v: number) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                    : undefined
+                                }
+                              />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Area type="monotone" dataKey="value" stroke="#6366F1" fill="#6366F1" fillOpacity={0.3} strokeWidth={2} />
+                            </AreaChart>
+                          )}
+                          {chart.chart_type === "bar" && (
+                            <BarChart data={data}>
+                              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#6366F1" />
+                            </BarChart>
+                          )}
+                          {chart.chart_type === "pie" && (
+                            <PieChart>
+                              <Pie
+                                data={data}
+                                dataKey="value"
+                                nameKey="name"
+                                innerRadius={0}
+                                outerRadius={80}
+                                paddingAngle={4}
+                              >
+                                {data.map((_, index) => (
+                                  <Cell key={index} fill={pieColors[index % pieColors.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                            </PieChart>
+                          )}
+                          {chart.chart_type === "step_line" && (
+                            <LineChart data={data}>
+                              <XAxis
+                                dataKey={data[0]?.time != null ? "time" : "name"}
+                                type={data[0]?.time != null ? "number" : "category"}
+                                tick={{ fill: "#94A3B8", fontSize: 11 }}
+                                tickFormatter={
+                                  data[0]?.time != null
+                                    ? (v: number) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                    : undefined
+                                }
+                              />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Line type="step" dataKey="value" stroke="#6366F1" strokeWidth={2} dot={false} />
+                            </LineChart>
+                          )}
+                          {chart.chart_type === "spline" && (
+                            <LineChart data={data}>
+                              <XAxis
+                                dataKey={data[0]?.time != null ? "time" : "name"}
+                                type={data[0]?.time != null ? "number" : "category"}
+                                tick={{ fill: "#94A3B8", fontSize: 11 }}
+                                tickFormatter={
+                                  data[0]?.time != null
+                                    ? (v: number) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                                    : undefined
+                                }
+                              />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Line type="monotone" dataKey="value" stroke="#6366F1" strokeWidth={2} dot={false} />
+                            </LineChart>
+                          )}
+                          {chart.chart_type === "sparkline" && (
+                            <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                              <Line type="monotone" dataKey="value" stroke="#6366F1" strokeWidth={2} dot={false} />
+                            </LineChart>
+                          )}
+                          {chart.chart_type === "simple_bar" && (
+                            <BarChart data={data}>
+                              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#6366F1" />
+                            </BarChart>
+                          )}
+                          {chart.chart_type === "grouped_bar" && (
+                            <BarChart data={data}>
+                              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#6366F1" />
+                            </BarChart>
+                          )}
+                          {chart.chart_type === "stacked_bar" && (
+                            <BarChart data={data} stackOffset="sign">
+                              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Bar dataKey="value" stackId="a" radius={[8, 8, 0, 0]} fill="#6366F1" />
+                            </BarChart>
+                          )}
+                          {chart.chart_type === "donut" && (
+                            <PieChart>
+                              <Pie
+                                data={data}
+                                dataKey="value"
+                                nameKey="name"
+                                innerRadius={55}
+                                outerRadius={80}
+                                paddingAngle={4}
+                              >
+                                {data.map((_, index) => (
+                                  <Cell key={index} fill={pieColors[index % pieColors.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                            </PieChart>
+                          )}
+                          {chart.chart_type === "treemap" && (
+                            <Treemap
+                              width={400}
+                              height={300}
+                              data={data.map((d) => ({ name: d.name, value: d.value || 0 }))}
+                              dataKey="value"
+                              ratio={4 / 3}
+                              stroke="#1e293b"
+                              fill="#6366F1"
+                            >
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                            </Treemap>
+                          )}
+                          {chart.chart_type === "histogram" && (
+                            <BarChart data={data}>
+                              <XAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatInteger(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatInteger(Number(v))}
+                              />
+                              <Bar dataKey="value" fill="#6366F1" />
+                            </BarChart>
+                          )}
+                          {chart.chart_type === "scatter_plot" && (
+                            <ScatterChart data={data.map((d) => ({ x: d.name, y: d.value || 0 }))}>
+                              <XAxis dataKey="x" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} tickFormatter={(v) => formatNumber(Number(v))} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                              <Scatter dataKey="y" fill="#6366F1" />
+                            </ScatterChart>
+                          )}
+                          {chart.chart_type === "spider" && (
+                            <RadarChart data={data.map((d) => ({ name: d.name, value: d.value || 0 }))}>
+                              <PolarGrid />
+                              <PolarAngleAxis dataKey="name" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <PolarRadiusAxis tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                              <Radar dataKey="value" stroke="#6366F1" fill="#6366F1" fillOpacity={0.3} />
+                              <Tooltip
+                                contentStyle={{ background: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
+                                formatter={(v) => formatNumber(Number(v))}
+                              />
+                            </RadarChart>
+                          )}
+                          {(chart.chart_type === "box_plot" ||
+                            chart.chart_type === "heatmap" ||
+                            chart.chart_type === "calendar_heatmap" ||
+                            chart.chart_type === "waterfall") && (
+                            <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+                              {chart.chart_type === "box_plot" && "Box Plot chart type requires additional data structure"}
+                              {chart.chart_type === "heatmap" && "Heatmap chart type requires additional data structure"}
+                              {chart.chart_type === "calendar_heatmap" && "Calendar Heatmap chart type requires additional data structure"}
+                              {chart.chart_type === "waterfall" && "Waterfall chart type requires additional data structure"}
+                            </div>
+                          )}
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           ) : activeView === "dashboard-settings" ? (
-            <section className="px-6 py-6">
+            <section className="px-6 py-6 space-y-6">
               <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
                 <p className="text-xs uppercase tracking-[0.3em] text-slate-500 mb-2">
                   Dashboard
                 </p>
-                <h2 className="text-lg font-semibold text-white mb-4">Visible charts</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">Current charts</h2>
                 <p className="text-sm text-slate-400 mb-6">
                   Choose which charts to show on the Dashboard page. Only selected charts will be visible.
                 </p>
-                <ul className="space-y-3">
+                {customChartsError && (
+                  <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 mb-4">
+                    {customChartsError}
+                  </div>
+                )}
+                {pendingDelete && (
+                  <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 mb-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-rose-200">
+                          Confirm deletion of "{pendingDelete.name}"
+                        </p>
+                        <p className="text-xs text-rose-300/80 mt-1">
+                          This action cannot be undone. Click the delete button again to confirm.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete(null)}
+                        className="text-xs text-rose-300 hover:text-rose-200 underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <ul className="space-y-4">
                   {[
-                    { id: "equityCurve" as const, label: "Equity Curve" },
-                    { id: "tradeOutcomes" as const, label: "Trade Outcomes" },
-                    { id: "sessionPerformance" as const, label: "Trades by Session" },
-                    { id: "setupQuality" as const, label: "Setup Quality" },
-                  ].map(({ id, label }) => (
-                    <li key={id} className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        id={`chart-${id}`}
-                        checked={dashboardChartVisibility[id]}
-                        onChange={() =>
-                          setDashboardChartVisibility((prev) => ({
-                            ...prev,
-                            [id]: !prev[id],
-                          }))
-                        }
-                        className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-500 focus:ring-accent-500/50"
-                      />
-                      <label htmlFor={`chart-${id}`} className="text-sm text-slate-200 cursor-pointer select-none">
-                        {label}
-                      </label>
-                    </li>
-                  ))}
+                    { id: "equityCurve" as const, label: "Equity Curve", chartType: "Line", features: ["Date", "PnL (cumulative)"] },
+                    { id: "tradeOutcomes" as const, label: "Trade Outcomes", chartType: "Pie", features: ["Outcome (Win/Loss)", "Count"] },
+                    { id: "sessionPerformance" as const, label: "Trades by Session", chartType: "Bar", features: ["Session", "Count"] },
+                    { id: "setupQuality" as const, label: "Setup Quality", chartType: "Line", features: ["Trade ID", "Actual R:R", "Expected R:R"] },
+                  ]
+                    .filter(({ id }) => !deletedBuiltInCharts.has(id))
+                    .map(({ id, label, chartType, features }) => (
+                      <li key={id} className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id={`chart-${id}`}
+                          checked={dashboardChartVisibility[id]}
+                          onChange={() =>
+                            setDashboardChartVisibility((prev) => ({
+                              ...prev,
+                              [id]: !prev[id],
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-500 focus:ring-accent-500/50 mt-0.5"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <label htmlFor={`chart-${id}`} className="text-sm text-slate-200 cursor-pointer select-none font-medium">
+                              {label}
+                            </label>
+                            <span className="text-slate-500 text-xs">({chartType})</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {features.map((feature, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center rounded-full border border-surface-700 bg-surface-800/70 px-2 py-0.5 text-xs text-slate-400"
+                              >
+                                {feature}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (pendingDelete?.type === "builtin" && pendingDelete.id === id) {
+                              setDeletedBuiltInCharts((prev) => new Set([...prev, id]));
+                              setPendingDelete(null);
+                            } else {
+                              setPendingDelete({ type: "builtin", id, name: label });
+                            }
+                          }}
+                          className={`p-1.5 rounded-lg transition ${
+                            pendingDelete?.type === "builtin" && pendingDelete.id === id
+                              ? "bg-rose-500/20 text-rose-400 border border-rose-500/50"
+                              : "text-slate-400 hover:bg-surface-800 hover:text-rose-400"
+                          }`}
+                          title={
+                            pendingDelete?.type === "builtin" && pendingDelete.id === id
+                              ? "Click again to confirm deletion"
+                              : "Delete chart"
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  {customChartsLoading && (
+                    <li className="text-sm text-slate-400">Loading custom charts…</li>
+                  )}
+                  {customCharts.map((chart) => {
+                    const featureLabels = chart.features.map((f) => {
+                      const opt = dashboardChartFeatureOptions.find((o) => o.value === f);
+                      return opt ? opt.label : f;
+                    });
+                    return (
+                      <li key={chart._id} className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id={`custom-${chart._id}`}
+                          checked={chart.visible}
+                          onChange={async () => {
+                            try {
+                              await updateDashboardChart(chart._id, { visible: !chart.visible });
+                              await fetchCustomCharts();
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-500 focus:ring-accent-500/50 mt-0.5"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <label htmlFor={`custom-${chart._id}`} className="text-sm text-slate-200 cursor-pointer select-none font-medium">
+                              {chart.name}
+                            </label>
+                            <span className="text-slate-500 text-xs">({chart.chart_type.replace(/_/g, " ")})</span>
+                          </div>
+                          {featureLabels.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {featureLabels.map((label, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center rounded-full border border-surface-700 bg-surface-800/70 px-2 py-0.5 text-xs text-slate-400"
+                                >
+                                  {label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {featureLabels.length === 0 && (
+                            <span className="text-xs text-slate-500 mt-1">No features selected</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (pendingDelete?.type === "custom" && pendingDelete.id === chart._id) {
+                              try {
+                                await deleteDashboardChart(chart._id);
+                                await fetchCustomCharts();
+                                setPendingDelete(null);
+                              } catch {
+                                // ignore
+                              }
+                            } else {
+                              setPendingDelete({ type: "custom", id: chart._id, name: chart.name });
+                            }
+                          }}
+                          className={`p-1.5 rounded-lg transition ${
+                            pendingDelete?.type === "custom" && pendingDelete.id === chart._id
+                              ? "bg-rose-500/20 text-rose-400 border border-rose-500/50"
+                              : "text-slate-400 hover:bg-surface-800 hover:text-rose-400"
+                          }`}
+                          title={
+                            pendingDelete?.type === "custom" && pendingDelete.id === chart._id
+                              ? "Click again to confirm deletion"
+                              : "Delete chart"
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
+              </div>
+
+              <div className="rounded-3xl border border-surface-800 bg-surface-900/80 p-6 shadow-soft">
+                <h2 className="text-lg font-semibold text-white mb-4">Create chart</h2>
+                <p className="text-sm text-slate-400 mb-6">
+                  Add a custom chart. Choose a name, chart type, and which features (data fields) to use.
+                </p>
+                <form onSubmit={handleCreateChart} className="space-y-6">
+                  {createChartError && (
+                    <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                      {createChartError}
+                    </div>
+                  )}
+                  <label className="block">
+                    <span className="text-sm text-slate-300 block mb-2">Chart name</span>
+                    <input
+                      value={newChartName}
+                      onChange={(e) => setNewChartName(e.target.value)}
+                      placeholder="e.g. PnL by Session"
+                      className="rounded-2xl border border-surface-700/60 bg-surface-900/40 px-3 py-2 text-sm text-white placeholder:text-slate-500 w-full max-w-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm text-slate-300 block mb-2">Chart type</span>
+                    <Dropdown
+                      value={newChartType}
+                      onChange={(v) => setNewChartType(v as ChartType)}
+                      options={[
+                        { value: "line", label: "Line" },
+                        { value: "step_line", label: "Step Line" },
+                        { value: "spline", label: "Spline (Smooth Line)" },
+                        { value: "sparkline", label: "Sparkline" },
+                        { value: "area", label: "Area" },
+                        { value: "bar", label: "Bar" },
+                        { value: "simple_bar", label: "Simple Bar" },
+                        { value: "grouped_bar", label: "Grouped Bar" },
+                        { value: "stacked_bar", label: "Stacked Bar" },
+                        { value: "pie", label: "Pie" },
+                        { value: "donut", label: "Donut" },
+                        { value: "treemap", label: "Treemap" },
+                        { value: "histogram", label: "Histogram" },
+                        { value: "box_plot", label: "Box Plot" },
+                        { value: "scatter_plot", label: "Scatter Plot" },
+                        { value: "heatmap", label: "Heatmap" },
+                        { value: "calendar_heatmap", label: "Calendar Heatmap" },
+                        { value: "waterfall", label: "Waterfall" },
+                        { value: "spider", label: "Spider (Radar)" },
+                      ]}
+                      placeholder="Chart type"
+                      className="w-full max-w-xs"
+                    />
+                  </label>
+                  <div>
+                    <span className="text-sm text-slate-300 block mb-2">Features (data to use)</span>
+                    <p className="text-xs text-slate-500 mb-2">Select one or more. First is often used as category (e.g. Session), second as value (e.g. PnL or Count).</p>
+                    <div className="flex flex-wrap gap-2">
+                      {dashboardChartFeatureOptions.map((opt) => (
+                        <label
+                          key={opt.value}
+                          className={`flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm cursor-pointer transition ${
+                            newChartFeatures.includes(opt.value)
+                              ? "border-accent-500/70 bg-accent-500/20 text-white"
+                              : "border-surface-700 bg-surface-800/70 text-slate-300 hover:border-surface-600"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={newChartFeatures.includes(opt.value)}
+                            onChange={() => toggleNewChartFeature(opt.value)}
+                            className="h-4 w-4 rounded border-surface-600 bg-surface-800 text-accent-500 focus:ring-accent-500/50"
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={createChartSubmitting}
+                    className={btnPrimary}
+                  >
+                    {createChartSubmitting ? "Creating…" : "Create chart"}
+                  </button>
+                </form>
               </div>
             </section>
           ) : activeView === "new-account" ? (
@@ -3673,60 +4444,6 @@ function App() {
                     </label>
                   </div>
 
-                  <div className="trade-form-grid grid gap-x-8 gap-y-6 md:grid-cols-1">
-                    <div className="trade-form-field flex flex-col gap-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <label className="flex min-w-[220px] flex-1 flex-col gap-2">
-                          Tags (comma separated)
-                          <input
-                            name="tags"
-                            value={formState.tags}
-                            onChange={handleFieldChange}
-                            placeholder="Momentum, A+ Setup"
-                            className={inputWide}
-                          />
-                        </label>
-                        <label className="flex flex-col gap-2">
-                          Add to pool
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={newTag}
-                              onChange={(event) => setNewTag(event.target.value)}
-                              placeholder="New tag"
-                              className={inputBase}
-                            />
-                            <button
-                              type="button"
-                              onClick={handleAddTag}
-                              className={btnSecondary}
-                            >
-                              Add
-                            </button>
-                          </div>
-                        </label>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {tagPool.length === 0 ? (
-                          <span className="text-xs text-slate-500">
-                            Tag pool is empty. Add your first tag.
-                          </span>
-                        ) : (
-                          tagPool.map((tag) => (
-                            <button
-                              key={tag.name}
-                              type="button"
-                              onClick={() => addTagToField(tag.name)}
-                              className="rounded-full px-3 py-1 text-xs text-white shadow-soft transition hover:brightness-110"
-                              style={{ backgroundColor: tag.color }}
-                            >
-                              {tag.name}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="trade-form-grid grid gap-x-8 gap-y-10 md:grid-cols-2">
                     <label className="trade-form-field flex flex-col gap-2 text-sm">
                       Entry Reason
@@ -3788,27 +4505,300 @@ function App() {
                   <div className="trade-form-grid mt-6 grid gap-x-8 gap-y-10 md:grid-cols-2">
                     <div className="trade-form-field flex flex-col gap-2 text-sm">
                       <span>Upload Images</span>
-                      <div className="flex flex-wrap items-center gap-3">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onPaste={handleImagesPaste}
+                        onKeyDown={(e) => {
+                          if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            (e.currentTarget.querySelector('input[type="file"]') as HTMLInputElement)?.click();
+                          }
+                        }}
+                        className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-surface-600 bg-surface-900/30 p-3 focus:border-accent-400/50 focus:outline-none focus:ring-2 focus:ring-accent-400/20"
+                      >
                         <label className={`${btnSecondary} cursor-pointer`}>
-                          Choose Files
+                          Select images
                           <input
                             type="file"
                             multiple
+                            accept="image/*"
                             onChange={handleImagesChange}
                             className="hidden"
                           />
                         </label>
                         <span className="text-xs text-slate-400">
+                          or paste here (Ctrl+V)
+                        </span>
+                        <span className="text-xs text-slate-500">
                           {formState.images.length
-                            ? `${formState.images.length} file(s) selected`
-                            : "No files selected"}
+                            ? `${formState.images.length} file(s)`
+                            : "No images"}
                         </span>
                       </div>
                       {formState.images.length > 0 && (
-                        <div className="text-xs text-slate-400">
-                          {formState.images.map((file) => file.name).join(", ")}
+                        <div className="flex flex-wrap gap-2">
+                          {formState.images.map((file, index) => (
+                            <span
+                              key={`${file.name}-${index}`}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-surface-600 bg-surface-800 px-2.5 py-1.5 text-xs text-slate-300"
+                            >
+                              <span className="truncate max-w-[180px]" title={file.name}>
+                                {file.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => removeImageAt(index)}
+                                className="rounded p-0.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 focus:outline-none"
+                                title="Remove"
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  <div className="trade-form-grid mt-6 grid gap-x-8 gap-y-6 md:grid-cols-2">
+                    <div className="trade-form-field flex flex-col gap-2 text-sm">
+                      <p className="text-sm">Selected Tags</p>
+                      <div className="rounded-2xl border border-surface-700/60 bg-surface-900/40 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                        <div className="flex max-h-36 flex-wrap items-center gap-2 overflow-y-auto">
+                        {formState.tags
+                          .split(",")
+                          .map((t) => normalizeTag(t))
+                          .filter(Boolean)
+                          .map((tagName) => (
+                            <span
+                              key={tagName}
+                              className="inline-flex items-center gap-1 rounded-lg border border-surface-600 bg-surface-700 px-3 py-1.5 text-xs font-medium text-slate-200 shadow-soft transition hover:border-surface-500 hover:bg-surface-600"
+                            >
+                              <span>{tagName}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const current = formState.tags
+                                    .split(",")
+                                    .map((t) => normalizeTag(t))
+                                    .filter(Boolean);
+                                  const next = current.filter((t) => t !== tagName).join(", ");
+                                  setFormState((prev) => ({ ...prev, tags: next }));
+                                }}
+                                className="ml-0.5 rounded-full p-0.5 hover:bg-white/20 focus:outline-none"
+                                title={`Remove ${tagName}`}
+                                aria-label={`Remove ${tagName}`}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="trade-form-field flex flex-col gap-2 text-sm">
+                      <p className="text-sm">Available Tags</p>
+                      <div className="rounded-2xl border border-surface-700/60 bg-surface-900/40 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                        {availableTagsFromApi.length > 6 && (
+                          <input
+                            type="text"
+                            value={availableTagsSearch}
+                            onChange={(e) => setAvailableTagsSearch(e.target.value)}
+                            placeholder="Search tags…"
+                            className={`${inputBase} mb-2 w-full max-w-full text-sm`}
+                          />
+                        )}
+                        <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
+                        {availableTagsLoading ? (
+                          <span className="text-xs text-slate-500">Loading tags…</span>
+                        ) : availableTagsFromApi.length === 0 ? (
+                          <span className="text-xs text-slate-500">
+                            No tags yet. Add one via Manage Tags below.
+                          </span>
+                        ) : (() => {
+                          const q = availableTagsSearch.trim().toLowerCase();
+                          const filtered = q
+                            ? availableTagsFromApi.filter((t) =>
+                                t.tag_name.toLowerCase().includes(q)
+                              )
+                            : availableTagsFromApi;
+                          const toShow = filtered.length > 6 && !q ? filtered.slice(0, 6) : filtered;
+                          return (
+                            <>
+                              {toShow.map((tag) => (
+                                <button
+                                  key={tag._id}
+                                  type="button"
+                                  onClick={() => addTagToField(tag.tag_name)}
+                                  className="inline-flex items-center rounded-lg border border-surface-600 bg-surface-700 px-3 py-1.5 text-xs font-medium text-slate-200 shadow-soft transition hover:border-surface-500 hover:bg-surface-600"
+                                >
+                                  {tag.tag_name}
+                                </button>
+                              ))}
+                              {filtered.length > 6 && !q && (
+                                <span className="w-full text-xs text-slate-500">
+                                  Search above to see all {availableTagsFromApi.length} tags
+                                </span>
+                              )}
+                              {q && filtered.length === 0 && (
+                                <span className="text-xs text-slate-500">No tags match &quot;{availableTagsSearch}&quot;</span>
+                              )}
+                            </>
+                          );
+                        })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="trade-form-grid mt-6 grid gap-x-8 gap-y-10 md:grid-cols-2">
+                    <div className="trade-form-field flex flex-col gap-2 text-sm">
+                      <p className="text-sm mb-1">Manage Tags</p>
+                      <div
+                        className="inline-flex w-fit flex-col gap-2 text-xs text-slate-200"
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (manageTagsOpen) {
+                                setManageTagsOpen(false);
+                                setManageTagsMode(null);
+                              } else {
+                                setManageTagsOpen(true);
+                                setManageTagsMode(null);
+                              }
+                            }}
+                            className={`rounded-full px-3 py-1 text-[10px] font-semibold shadow-sm ${
+                              manageTagsOpen
+                                ? "bg-cyan-500 text-slate-900"
+                                : "bg-cyan-500/80 text-slate-900 hover:bg-cyan-400"
+                            }`}
+                          >
+                            Manage Tags
+                          </button>
+                          {manageTagsOpen && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  manageTagsMode === "add"
+                                    ? setManageTagsMode(null)
+                                    : openManageTags("add")
+                                }
+                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                                  manageTagsMode === "add"
+                                    ? "bg-emerald-500 text-white"
+                                    : "bg-surface-900/80 text-slate-200"
+                                }`}
+                              >
+                                Add
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  manageTagsMode === "delete"
+                                    ? setManageTagsMode(null)
+                                    : openManageTags("delete")
+                                }
+                                className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                                  manageTagsMode === "delete"
+                                    ? "bg-rose-500 text-white"
+                                    : "bg-surface-900/80 text-slate-200"
+                                }`}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {manageTagsOpen && manageTagsMode === "add" && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <input
+                              value={manageTagName}
+                              onChange={(e) => setManageTagName(e.target.value)}
+                              placeholder="New tag name"
+                              className={`${inputBase} bg-transparent max-w-[260px]`}
+                            />
+                            <button
+                              type="button"
+                              disabled={manageTagsLoading || !normalizeTag(manageTagName)}
+                              onClick={handleManageTagCreate}
+                              className="rounded-2xl bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-accent-400/40 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {manageTagsLoading ? "Adding…" : "Add"}
+                            </button>
+                          </div>
+                        )}
+                        {manageTagsOpen && manageTagsMode === "delete" && (
+                          <div className="mt-2 flex flex-col gap-2">
+                            {manageTagsLoading && allTagsList.length === 0 ? (
+                              <span className="text-slate-500">Loading tags…</span>
+                            ) : allTagsList.length === 0 ? (
+                              <span className="text-slate-500">No tags to delete.</span>
+                            ) : (
+                              <>
+                                <div className="flex flex-wrap gap-2">
+                                  {allTagsList.map((t) => (
+                                    <span
+                                      key={t._id}
+                                      className="inline-flex items-center gap-1.5 rounded-lg border border-surface-600 bg-surface-800 px-2.5 py-1.5 text-xs text-slate-200"
+                                    >
+                                      <span>{t.tag_name}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setTagToDelete(t);
+                                          setDeleteTagConfirmStep(1);
+                                        }}
+                                        disabled={deleteTagConfirmStep === 1 && tagToDelete?._id === t._id}
+                                        className="rounded p-0.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 focus:outline-none disabled:opacity-50"
+                                        title="Delete this tag"
+                                        aria-label={`Delete ${t.tag_name}`}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                                {tagToDelete && deleteTagConfirmStep === 1 && (
+                                  <div className="mt-2 rounded-lg border border-surface-600 bg-surface-800 p-2 flex flex-col gap-2">
+                                    <p className="text-slate-300 text-xs">
+                                      Delete tag &quot;{tagToDelete.tag_name}&quot;? This will remove it permanently.
+                                    </p>
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        disabled={manageTagsLoading}
+                                        onClick={handleManageTagDeleteConfirm}
+                                        className="rounded-xl bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-60"
+                                      >
+                                        {manageTagsLoading ? "Deleting…" : "Confirm delete"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={manageTagsLoading}
+                                        onClick={() => {
+                                          setTagToDelete(null);
+                                          setDeleteTagConfirmStep(null);
+                                        }}
+                                        className="rounded-xl bg-surface-700 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-surface-600 disabled:opacity-60"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {manageTagsError && (
+                          <p className="mt-1 text-rose-400 text-xs">{manageTagsError}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 

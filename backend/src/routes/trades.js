@@ -2,6 +2,12 @@ const path = require("path");
 const router = require("express").Router();
 const mongoose = require("mongoose");
 const { buildTradeData } = require("../utils/tradeHelpers");
+const {
+  syncTagsForTrade,
+  removeTradeIdFromAllTags,
+  getTagNamesByTradeId,
+  getTagNamesForTrade,
+} = require("../utils/tagHelpers");
 const Trade = require("../models/Trade");
 const Strategy = require("../models/Strategy");
 const Account = require("../models/Account");
@@ -42,7 +48,16 @@ const listTrades = async (query) => {
   if (strategy_id) where.strategy_id = strategy_id;
   if (account_id) where.account_id = account_id;
   if (direction) where.direction = direction;
-  if (tag) where.tags = { $in: [tag] };
+  let tagTradeIds = null;
+  if (tag) {
+    const Tag = require("../models/Tag");
+    const tagDoc = await Tag.findOne({ tag_name: tag }).select("trade_ids").lean();
+    tagTradeIds = tagDoc ? (tagDoc.trade_ids || []) : [];
+    if (tagTradeIds.length === 0) {
+      return [];
+    }
+    where.trade_id = { $in: tagTradeIds };
+  }
   if (date_from || date_to) {
     where.start_datetime = {};
     if (date_from) where.start_datetime.$gte = new Date(date_from);
@@ -58,15 +73,22 @@ const listTrades = async (query) => {
     .populate("strategy_id", "strategy_name")
     .populate("account_id", "account_name");
 
-  return trades.map((trade) => ({
-    ...trade.toObject(),
-    strategy: trade.strategy_id
-      ? { strategy_id: trade.strategy_id._id, strategy_name: trade.strategy_id.strategy_name }
-      : null,
-    account: trade.account_id
-      ? { account_id: trade.account_id._id, account_name: trade.account_id.account_name }
-      : null,
-  }));
+  const tradeIds = trades.map((t) => t.trade_id);
+  const tagsByTradeId = await getTagNamesByTradeId(tradeIds);
+
+  return trades.map((trade) => {
+    const obj = trade.toObject();
+    return {
+      ...obj,
+      tags: tagsByTradeId.get(trade.trade_id) || [],
+      strategy: trade.strategy_id
+        ? { strategy_id: trade.strategy_id._id, strategy_name: trade.strategy_id.strategy_name }
+        : null,
+      account: trade.account_id
+        ? { account_id: trade.account_id._id, account_name: trade.account_id.account_name }
+        : null,
+    };
+  });
 };
 
 module.exports = (upload) => {
@@ -87,8 +109,10 @@ module.exports = (upload) => {
     if (!trade) {
       return res.status(404).json({ error: "Trade not found" });
     }
+    const tags = await getTagNamesForTrade(trade.trade_id);
     res.json({
       ...trade.toObject(),
+      tags,
       strategy: trade.strategy_id
         ? { strategy_id: trade.strategy_id._id, strategy_name: trade.strategy_id.strategy_name }
         : null,
@@ -130,13 +154,16 @@ module.exports = (upload) => {
     const trade = await Trade.create({
       ...data,
       trade_id: tradeId,
-      tags,
       strategy_id: strategyId ?? undefined,
       account_id: accountId ?? undefined,
       trend_multi_timeframe: payload.trend_multi_timeframe ?? null,
     });
 
-    res.status(201).json(trade);
+    await syncTagsForTrade(tradeId, tags);
+
+    const out = trade.toObject();
+    out.tags = await getTagNamesForTrade(tradeId);
+    res.status(201).json(out);
   });
 
   router.put("/:id", async (req, res) => {
@@ -170,7 +197,6 @@ module.exports = (upload) => {
       { trade_id: req.params.id },
       {
         ...data,
-        tags: tags ?? undefined,
         strategy_id: strategyId ?? undefined,
         account_id: accountId ?? undefined,
         trend_multi_timeframe: payload.trend_multi_timeframe ?? null,
@@ -181,20 +207,30 @@ module.exports = (upload) => {
     if (!updated) {
       return res.status(404).json({ error: "Trade not found" });
     }
-    res.json(updated);
+
+    await syncTagsForTrade(updated.trade_id, tags ?? []);
+
+    const out = updated.toObject();
+    out.tags = await getTagNamesForTrade(updated.trade_id);
+    res.json(out);
   });
 
   router.delete("/all", async (req, res) => {
+    const trades = await Trade.find({}).select("trade_id").lean();
+    for (const t of trades) {
+      await removeTradeIdFromAllTags(t.trade_id);
+    }
     const result = await Trade.deleteMany({});
     res.json({ status: "deleted", deletedCount: result.deletedCount });
   });
 
   router.delete("/:id", async (req, res) => {
+    await removeTradeIdFromAllTags(req.params.id);
     await Trade.deleteOne({ trade_id: req.params.id });
     res.json({ status: "deleted" });
   });
 
-  router.post("/:id/images", upload.array("images", 6), async (req, res) => {
+  router.post("/:id/images", upload.array("images", 20), async (req, res) => {
     const files = req.files || [];
     const trade = await Trade.findOne({ trade_id: req.params.id });
     if (!trade) {

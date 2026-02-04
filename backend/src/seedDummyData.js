@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const Trade = require("./models/Trade");
 const Account = require("./models/Account");
 const Strategy = require("./models/Strategy");
+const { syncTagsForTrade } = require("./utils/tagHelpers");
 
 dotenv.config();
 
@@ -107,12 +108,13 @@ async function seedTrades() {
       exit_reason: "Seed trade exit reason.",
       notes: "This is a dummy trade created by the seed script.",
       custom_fields: {},
-      tags: ["seed"],
       images: [],
     };
 
     // eslint-disable-next-line no-await-in-loop
     await Trade.create(tradeDoc);
+    // eslint-disable-next-line no-await-in-loop
+    await syncTagsForTrade(tradeId, ["seed"]);
     balance += pnl;
   }
 
