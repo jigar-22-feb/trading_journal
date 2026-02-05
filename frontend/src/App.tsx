@@ -2884,9 +2884,6 @@ function App() {
                           <h2 className="text-lg font-semibold">
                             Themes
                           </h2>
-                          <p className="mt-1 text-sm text-slate-400">
-                            Choose a color theme for your trading journal.
-                          </p>
                         </div>
                       </div>
                       <div className="max-w-sm space-y-3">
@@ -2901,9 +2898,6 @@ function App() {
                               className="!max-w-none !px-2 !py-1.5 text-sm"
                             />
                           </div>
-                          <span className="text-[11px] text-slate-500">
-                            Theme is saved to this browser and applied across the app.
-                          </span>
                         </label>
                       </div>
                     </div>
